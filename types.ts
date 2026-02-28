@@ -85,7 +85,7 @@ export type Poste = {
   isPlaced?: boolean; // New field for manual mode state
   colorName?: string; // New field for persistent color assignment
   // Free Mode Props
-  x?: number; 
+  x?: number;
   y?: number;
   rotation?: number; // Rotation in degrees
   shape?: 'rect' | 'circle' | 'zone'; // Visual shape
@@ -121,6 +121,9 @@ export type FicheData = {
   clientPrice: number;
   observations: string;
   costMinute: number;
+  sizes?: string[];
+  colors?: { id: string, name: string }[];
+  gridQuantities?: Record<string, number>;
 };
 
 // --- NEW TYPES FOR COST CALCULATOR ---
@@ -133,6 +136,7 @@ export interface Material {
   unit: string;
   threadMeters: number;
   threadCapacity: number;
+  fournisseur?: string;
 }
 
 export interface PurchasingData extends Material {
@@ -142,14 +146,39 @@ export interface PurchasingData extends Material {
   lineCost: number;
 }
 
+export interface AppTask {
+  id: string;
+  text: string;
+  assigneeName: string; // The person assigned to this task (e.g., 'Ahmed - Qualité' or 'Global Admin')
+  assigneeRole?: string; // e.g. 'Chef de chaîne'
+  status: 'PENDING' | 'DONE_OK' | 'DONE_NOT_OK' | 'SKIPPED';
+  skipReason?: string;
+  date: string; // YYYY-MM-DD
+  isDone: boolean; // Keep for backward compatibility or remove if safe (let's keep and sync with status)
+  createdAt: string;
+}
+
 export interface AppSettings {
+  // --- EXISTING FINANCIAL SETTINGS ---
   costMinute: number;
-  useCostMinute: boolean; // New toggle field
+  useCostMinute: boolean;
   cutRate: number;
   packRate: number;
   marginAtelier: number;
   tva: number;
   marginBoutique: number;
+  // --- New App Settings ---
+  workingHoursStart: string; // e.g. "08:00"
+  workingHoursEnd: string; // e.g. "18:00"
+  timeFormat: '12h' | '24h'; // Whether to display time in 12h AM/PM or 24h format
+  pauses: { id: string, name: string, start: string, end: string, durationMin: number }[]; // Added 'name' for pause
+  workingDays: number[]; // e.g [1,2,3,4,5] (Monday to Friday, 1=Monday)
+  currency: string; // 'MAD' | 'EUR' | 'USD'
+  chainsCount: number; // e.g 12
+  organigram: { id: string, name: string, role: string, parentId?: string }[]; // General Managers
+  chainStaff: Record<string, { id: string, name: string, role: string }[]>; // Staff/Supervisors per chain
+  calendarExceptions?: Record<string, { isWorking: boolean, note: string }>; // Key: 'YYYY-MM-DD', for specific holidays or extra working days
+  tasks?: AppTask[]; // Task management system
 }
 
 export interface PdfSettings {
@@ -164,19 +193,49 @@ export interface Translations {
   };
 }
 
+// --- NEW TYPE FOR WORKFLOW & COUPE ---
+export type WorkflowStatus = 'COUPE' | 'METHODES' | 'PLANNING' | 'SUIVI' | 'EXPORT';
+
+export interface Faisceau {
+  id: string;
+  taille: string;
+  couleur: string;
+  quantite: number;
+  codeBarre: string;
+}
+
+export interface OrdreCoupe {
+  refModele: string;
+  longueurMatelas: number;
+  consommation: number;
+  nbrFeuilles: number;
+  nbrMatelas: number;
+  qteTotale: number;
+  status: 'EN_PREPARATION' | 'EN_COURS' | 'SOUS_TRAITANCE' | 'VALIDE' | 'REJETE';
+  faisceaux?: Faisceau[];
+}
+
 // --- NEW TYPE FOR LIBRARY ---
 export interface ModelData {
   id: string;
   filename: string;
+  workflowStatus?: WorkflowStatus; // NEW: Track the OF lifecycle
+  ordreCoupe?: OrdreCoupe; // NEW: Cutting order details
+  isPublishedToLibrary?: boolean; // NEW: True if visible in Bibliothèque
   image?: string | null; // Thumbnail (Front)
   images?: { front: string | null; back: string | null }; // NEW: Store both images fully
+  ficheData?: FicheData; // NEW: Store complete FicheData for matrix sync
   meta_data: {
     nom_modele: string;
+    reference?: string; // Added Reference
     category?: string; // Added Category for search and display
     date_creation: string;
     date_lancement?: string; // Added Launch Date
     total_temps: number; // in minutes
     effectif: number;
+    sizes?: string[]; // Synchronized from FicheTechnique
+    colors?: { id: string, name: string }[]; // Synchronized from FicheTechnique
+    quantity?: number; // Total pieces
   };
   gamme_operatoire: Operation[];
   // Added for Implantation persistence
@@ -188,3 +247,66 @@ export interface ModelData {
     savedPlantations?: { id: string, name: string, date: string, layoutType: string, postes: { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[] }[]; // NEW: Manual saves
   };
 }
+
+// --- NEW TYPES FOR EXTENDED MODULES (CHRONO, PLANNING, SUIVI, MAGASIN) ---
+
+export type ChronoData = {
+  operationId: string;
+  tr1?: number;
+  tr2?: number;
+  tr3?: number;
+  tr4?: number;
+  tr5?: number;
+  tm?: number; // Temps Moyen
+  majoration: number; // Taux de majoration (default 1.15)
+  tempMajore?: number; // TM * Majoration
+  pMax?: number; // Production Maximale
+  p85?: number; // Production à 85%
+};
+
+export type PlanningEvent = {
+  id: string;
+  modelId: string;
+  chaineId: string;
+  dateLancement: string;
+  dateExport: string;
+  qteTotal: number;
+  superviseur: string;
+  status?: 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK' | 'DONE';
+};
+
+export type HourlySuivi = {
+  h0830?: number;
+  h0930?: number;
+  h1030?: number;
+  h1130?: number;
+  h1230?: number;
+  h1430?: number;
+  h1530?: number;
+  h1630?: number;
+  h1730?: number;
+  h1830?: number;
+  h1930?: number;
+};
+
+export type SuiviData = {
+  id: string;
+  planningId: string;
+  date: string;
+  entrer: number;
+  sorties: HourlySuivi;
+  totalHeure: number;
+  pJournaliere: number;
+  enCour: number;
+  resteEntrer: number;
+  resteSortie: number;
+  machinistes: number;
+  tracage: number;
+  preparation: number;
+  finition: number;
+  controle: number;
+  totalWorkers: number;
+  downtimes?: Record<string, string>; // NEW: Phase 13 - Reasons for missed targets
+  defauts?: { id: string; hour: string; type: string; quantity: number; notes: string }[]; // NEW: Phase 13 - In-Line QC
+  trs?: number; // NEW: Phase 13 - OEE/TRS score
+};

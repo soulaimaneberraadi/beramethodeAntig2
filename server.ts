@@ -9,7 +9,7 @@ import { authenticateToken } from './server/middleware';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 7000;
 
   app.use(express.json());
   app.use(cookieParser());
@@ -19,12 +19,12 @@ async function startServer() {
   app.post('/api/auth/login', login);
   app.post('/api/auth/logout', logout);
   app.get('/api/auth/me', me);
-  
+
   // Password Reset Routes
   app.post('/api/auth/forgot-password', requestPasswordReset);
   app.post('/api/auth/verify-code', verifyResetCode);
   app.post('/api/auth/reset-password', resetPassword);
-  
+
   // Temporary Setup Route
   app.post('/api/setup-admin', makeMeAdmin);
 
@@ -51,8 +51,8 @@ async function startServer() {
     app.use(express.static('dist'));
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Server running on http://127.0.0.1:${PORT}`);
   });
 }
 

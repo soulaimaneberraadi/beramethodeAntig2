@@ -38,61 +38,64 @@ import {
     ArrowLeftRight,
     Eye,
     EyeOff,
+    Maximize2,
+    Hash,
+    Maximize,
+    Minimize,
+    ImageIcon,
+    Loader2,
+    Timer,
+    FolderOpen,
+    Save,
+    Columns,
+    LayoutGrid,
+    CircleDashed,
+    MousePointerClick,
+    Menu,
+    Inbox,
+    GitMerge,
+    AlertTriangle,
+    Unlink2,
+    Bot,
+    Hand,
+    LayoutDashboard,
+    AlignHorizontalSpaceAround,
+    AlignVerticalSpaceAround,
+    RefreshCw,
+    Move,
     ArrowRightLeft,
+    ArrowLeftRight as AlignIcon,
+    ArrowRightLeft as SwapIcon,
     Clock,
     Sparkles,
     Thermometer,
     Scaling,
     ZoomIn,
     ZoomOut,
-    Maximize,
     GripHorizontal,
     Component,
     Download,
-    Timer,
     Users,
     Percent,
-    Minimize,
     List,
     Link as LinkIcon,
-    GitMerge,
     GitCommit,
     Flower2,
     ArrowDownToLine,
-    LayoutDashboard,
-    Inbox,
-    AlertTriangle,
-    ArrowLeftRight as SwapIcon,
     ListPlus,
-    AlignHorizontalSpaceAround,
-    AlignVerticalSpaceAround,
-    Bot,
-    Hand,
-    Save,
-    RefreshCw,
     Edit,
     Link2,
-    Unlink2,
-    LayoutGrid,
     SquareDashed,
     Magnet,
     ListOrdered,
     MessageSquare,
-    MousePointerClick,
-    Move,
     RotateCw,
     BoxSelect,
     Circle,
     Square,
-    FolderOpen,
-    Image as ImageIcon,
-    Loader2,
+    Image as ImageIconAlt,
     LogOut,
     LayoutTemplate,
-    Menu,
-    CircleDashed,
-    AlignJustify as AlignIcon,
-    Columns,
     ChevronDown
 } from 'lucide-react';
 
@@ -329,22 +332,41 @@ const LinkOverlay = ({
         const containerRect = containerRef.current.getBoundingClientRect();
 
         const newPaths = links.map((link, index) => {
-            const fromEl = document.getElementById(`station-card-${link.from}`);
-            const toEl = document.getElementById(`station-card-${link.to}`);
+            // Try exact match first, then try with __1 suffix (expanded stations)
+            let fromEl = document.getElementById(`station-card-${link.from}`);
+            let toEl = document.getElementById(`station-card-${link.to}`);
+
+            // If not found, look for __1 variant (workstation expansion)
+            if (!fromEl) {
+                fromEl = document.getElementById(`station-card-${link.from}__1`) ||
+                    document.querySelector(`[id^="station-card-${link.from}"]`) as HTMLElement | null;
+            }
+            if (!toEl) {
+                toEl = document.getElementById(`station-card-${link.to}__1`) ||
+                    document.querySelector(`[id^="station-card-${link.to}"]`) as HTMLElement | null;
+            }
 
             if (!fromEl || !toEl) return null;
+
+            // containerRef is the scrollContainerRef (ouside zoom), but the SVG is inside contentRef (zoomed).
+            // We need coordinates in the unzoomed SVG space.
+            // Formula: svgX = (elementRect.left - contentRect.left + scrollLeft) / zoom... but since
+            // the SVG is already INSIDE the scaled div, element positions relative to the container ARE the right coords.
+            // We compute: pos = (rect.left - containerRect.left + containerRef.scrollLeft) / zoom
+            const scrollLeft = containerRef.current?.scrollLeft || 0;
+            const scrollTop = containerRef.current?.scrollTop || 0;
 
             const fromRect = fromEl.getBoundingClientRect();
             const toRect = toEl.getBoundingClientRect();
 
-            // Normalized Coordinates relative to container (unzoomed)
-            const fromX = (fromRect.left - containerRect.left) / zoom;
-            const fromY = (fromRect.top - containerRect.top) / zoom;
+            // Compute positions in SVG coordinate space (unzoomed)
+            const fromX = (fromRect.left - containerRect.left + scrollLeft) / zoom;
+            const fromY = (fromRect.top - containerRect.top + scrollTop) / zoom;
             const fromW = fromRect.width / zoom;
             const fromH = fromRect.height / zoom;
 
-            const toX = (toRect.left - containerRect.left) / zoom;
-            const toY = (toRect.top - containerRect.top) / zoom;
+            const toX = (toRect.left - containerRect.left + scrollLeft) / zoom;
+            const toY = (toRect.top - containerRect.top + scrollTop) / zoom;
             const toW = toRect.width / zoom;
             const toH = toRect.height / zoom;
 
@@ -364,42 +386,45 @@ const LinkOverlay = ({
             const color = PATH_COLORS[index % PATH_COLORS.length];
             let type: 'forward' | 'loop' | 'vertical' = 'forward';
 
-            // MANHATTAN ROUTING LOGIC (ORTHOGONAL)
-            if (toX > fromX + fromW + 20) {
-                // Forward Flow (Standard)
-                // Right -> Mid -> Left
+            // Phase 25: SMART ROUTING LOGIC (CIRCUIT BOARD STYLE)
+            // 1. Direct Horizontal (Adjacent cards in the same row)
+            if (toX > srcRight + 10 && toX < srcRight + 300 && Math.abs(tgtCy - srcCy) < 50) {
                 const midX = srcRight + (tgtLeft - srcRight) / 2;
-
                 points = [
                     { x: srcRight, y: srcCy },
                     { x: midX, y: srcCy },
                     { x: midX, y: tgtCy },
                     { x: tgtLeft, y: tgtCy }
                 ];
-
                 labelX = midX;
                 labelY = (srcCy + tgtCy) / 2;
                 type = 'forward';
-
             } else {
-                // Backward Loop (Feedback) or Vertical Stack
-                // "Manhattan Loop": Out Right -> Down -> Back -> Up -> In Left
+                // 2. Bus Routing (Dodge cards by routing over or under)
+                // Assign each link a vertical lane offset
+                const laneOffset = (index % 6 + 1) * 12;
+                // Determine routing direction (above or below)
+                const routeBelow = toY >= fromY;
 
-                const laneOffset = (index % 5 + 1) * 12; // Avoid overlapping lines
-                const busY = Math.max(srcBottom, tgtBottom) + 20 + laneOffset;
+                const busY = routeBelow
+                    ? Math.max(srcBottom, tgtBottom) + 25 + laneOffset
+                    : Math.min(fromY, toY) - 25 - laneOffset;
 
-                // Exit Right -> Down -> Left (Back) -> Up -> Enter Left
+                // Stagger exits and entrances to prevent overlapping lines
+                const exitX = srcRight + 15 + (index % 4) * 6;
+                const enterX = tgtLeft - 15 - (index % 4) * 6;
+
                 points = [
                     { x: srcRight, y: srcCy },
-                    { x: srcRight + 20 + laneOffset, y: srcCy }, // Push out a bit
-                    { x: srcRight + 20 + laneOffset, y: busY },
-                    { x: tgtLeft - 20 - laneOffset, y: busY },
-                    { x: tgtLeft - 20 - laneOffset, y: tgtCy },
+                    { x: exitX, y: srcCy },
+                    { x: exitX, y: busY },
+                    { x: enterX, y: busY },
+                    { x: enterX, y: tgtCy },
                     { x: tgtLeft, y: tgtCy }
                 ];
 
-                labelX = (srcRight + 20 + tgtLeft - 20) / 2;
-                labelY = busY;
+                labelX = (exitX + enterX) / 2;
+                labelY = busY - 10; // Label slightly above the bus line
                 type = 'loop';
             }
 
@@ -421,6 +446,22 @@ const LinkOverlay = ({
         const frame = requestAnimationFrame(calculatePaths);
         return () => cancelAnimationFrame(frame);
     }, [calculatePaths]);
+
+    // Also recalculate on window resize or scroll events
+    useEffect(() => {
+        const debouncedCalc = () => { requestAnimationFrame(calculatePaths); };
+        window.addEventListener('resize', debouncedCalc);
+        const container = containerRef.current;
+        if (container) container.addEventListener('scroll', debouncedCalc, { passive: true });
+        // Use MutationObserver to detect DOM changes (card movements)
+        const observer = new MutationObserver(debouncedCalc);
+        if (container) observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+        return () => {
+            window.removeEventListener('resize', debouncedCalc);
+            if (container) container.removeEventListener('scroll', debouncedCalc);
+            observer.disconnect();
+        };
+    }, [calculatePaths, containerRef]);
 
     if (!showLinks) return null;
 
@@ -456,11 +497,11 @@ const LinkOverlay = ({
                     <foreignObject x={p.labelX - (60 / zoom)} y={p.labelY - (15 / zoom)} width={120 / zoom} height={30 / zoom} className="overflow-visible">
                         <div className="flex items-center justify-center gap-1 hover:scale-110 transition-transform origin-center" style={{ transform: `scale(${1 / zoom})` }}>
                             {p.label ? (
-                                <div onClick={() => onEditLabel(p.id, p.label)} className="bg-white text-slate-700 text-[10px] font-bold px-2 py-1 rounded-lg shadow-md border border-slate-200 whitespace-nowrap cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 max-w-[100px] truncate" title={p.label}>{p.label}</div>
+                                <div onClick={() => onEditLabel(p.id, p.label)} className="bg-white/90 backdrop-blur-sm text-slate-700 text-[10px] font-bold px-2 py-1 rounded-lg shadow-md border border-slate-200 whitespace-nowrap cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 max-w-[100px] truncate relative z-50" title={p.label}>{p.label}</div>
                             ) : (
-                                <button onClick={() => onEditLabel(p.id)} className="bg-white p-1 rounded-full border border-slate-200 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-indigo-500"><MessageSquare className="w-3 h-3" /></button>
+                                <button onClick={() => onEditLabel(p.id)} className="bg-white/90 backdrop-blur-sm p-1 rounded-full border border-slate-200 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-indigo-500 relative z-50"><MessageSquare className="w-3 h-3" /></button>
                             )}
-                            <button onClick={() => onRemoveLink(p.id)} className="bg-white text-slate-300 p-1 rounded-full border border-slate-200 shadow-sm hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
+                            <button onClick={() => onRemoveLink(p.id)} className="bg-white/90 backdrop-blur-sm text-slate-300 p-1 rounded-full border border-slate-200 shadow-sm hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity relative z-50"><X className="w-3 h-3" /></button>
                         </div>
                     </foreignObject>
                 </g>
@@ -500,6 +541,12 @@ export default function Implantation({
     // --- CALCULATIONS FOR HEADER ---
     const totalMin = useMemo(() => operations.reduce((sum, op) => sum + (op.time || 0), 0), [operations]);
     const tempsArticle = totalMin * 1.20;
+
+    // --- NEW: REAL-TIME MACHINE COUNTER ---
+    const placedMachinesCount = useMemo(() => {
+        if (!postes) return 0;
+        return postes.filter(p => p.isPlaced && p.machine !== 'VIDE' && !p.notes?.includes('Emplacement Vide')).length;
+    }, [postes]);
 
     const prodDay100 = tempsArticle > 0 ? (presenceTime * numWorkers) / tempsArticle : 0;
     const prodDayEff = prodDay100 * (efficiency / 100);
@@ -583,6 +630,14 @@ export default function Implantation({
     const [swapControlFinition, setSwapControlFinition] = useState(false);
     const [zoom, setZoom] = useState(1);
     const [simulationActive, setSimulationActive] = useState(false);
+
+    // --- FIX 4: RESET SCROLL ON ORIENTATION CHANGE ---
+    useEffect(() => {
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        }
+    }, [orientation]);
+
     const [simStep, setSimStep] = useState(-1);
     const [showMaterialsPanel, setShowMaterialsPanel] = useState(false);
     const [matPanel, setMatPanel] = useState({ x: window.innerWidth - 340, y: 120, w: 300, h: 400 });
@@ -700,9 +755,9 @@ export default function Implantation({
             setIsManualMode(true);
         }
 
-        // Filter only "Active" items (Placed) to arrange
-        const itemsToArrange = postes.filter(p => p.isPlaced);
-        const otherItems = postes.filter(p => !p.isPlaced);
+        // Take all non-empty stations and ensure they are marked as placed
+        const itemsToArrange = postes.filter(p => p.machine !== 'VIDE').map(p => ({ ...p, isPlaced: true }));
+        const otherItems = postes.filter(p => p.machine === 'VIDE');
 
         const updatedItems = itemsToArrange.map((p, idx) => {
             let x = 0, y = 0, rotation = 0;
@@ -720,15 +775,10 @@ export default function Implantation({
                 } else {
                     // Right Column (Bottom to Top)
                     x = 100 + colSpacing + 100; // Gap
-                    // idx starts from midPoint. 
-                    // If midPoint=10, idx=10. We want y to be same as idx=9
-                    // Let's make it simpler: Right side mirrors left side but going up
                     const relativeIdx = idx - midPoint;
-                    // Start from bottom
                     y = 100 + ((midPoint - 1 - relativeIdx) * rowSpacing);
                     rotation = 0;
                 }
-                // Add a connector piece at bottom if odd number? Simplify for now.
             }
             else if (type === 'CIRCLE') {
                 const radius = Math.max(300, itemsToArrange.length * 40);
@@ -1049,9 +1099,21 @@ export default function Implantation({
 
             const { id, startX, startY, startLeft, startTop } = freeDragRef.current;
 
-            // PRECISION FIX: Round the delta to avoid sub-pixel jitter
-            const dx = Math.round((clientX - startX) / zoom);
-            const dy = Math.round((clientY - startY) / zoom);
+            let dx = Math.round((clientX - startX) / zoom);
+            let dy = Math.round((clientY - startY) / zoom);
+
+            // Phase 25: Magnetic Snap-to-grid in Free Layout
+            // Snap to 40px grid relative to the absolute background coordinate system
+            if (isMagnetic) {
+                const GRID_SIZE = 40;
+                const currentX = startLeft + dx;
+                const currentY = startTop + dy;
+                const snapX = Math.round(currentX / GRID_SIZE) * GRID_SIZE;
+                const snapY = Math.round(currentY / GRID_SIZE) * GRID_SIZE;
+
+                dx = snapX - startLeft;
+                dy = snapY - startTop;
+            }
 
             if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
                 freeDragRef.current.hasMoved = true;
@@ -1394,7 +1456,7 @@ export default function Implantation({
             const sortedStations = [...initialStations];
             const expandedResult: Workstation[] = [];
             sortedStations.forEach((st, idx) => {
-                const showOnCanvas = isManualMode ? (st.isPlaced === true) : true;
+                const showOnCanvas = isManualMode ? (st.isPlaced === true || st.machine === 'VIDE') : true;
                 if (showOnCanvas) {
                     if (st.originalId) {
                         expandedResult.push({ ...st, index: expandedResult.length + 1, isPlaced: true });
@@ -1559,7 +1621,7 @@ export default function Implantation({
     const toggleSimulation = () => { if (simulationActive) { setSimulationActive(false); } else { setSimStep(-1); setSimulationActive(true); } };
     const resetSimulation = () => { setSimulationActive(false); setSimStep(-1); };
 
-    const zigZagPairs = useMemo(() => { const pairs = []; const usedIndices = new Set<number>(); if (isManualMode) { for (let i = 0; i < workstations.length; i += 2) { const top = workstations[i]; const bottom = workstations[i + 1]; pairs.push({ top, bottom }); } } else { for (let i = 0; i < workstations.length; i++) { if (usedIndices.has(i)) continue; const current = workstations[i]; let bottomCandidateIndex = -1; if (current.isFeeder) { const targetBaseId = current.feedsInto; for (let j = i + 1; j < workstations.length; j++) { if (usedIndices.has(j)) continue; const candidate = workstations[j]; const candidateBaseId = candidate.id.split('__')[0]; if (candidateBaseId === targetBaseId) { bottomCandidateIndex = j; break; } } } if (bottomCandidateIndex !== -1) { pairs.push({ top: current, bottom: workstations[bottomCandidateIndex] }); usedIndices.add(i); usedIndices.add(bottomCandidateIndex); } else { let nextIndex = i + 1; while (usedIndices.has(nextIndex) && nextIndex < workstations.length) nextIndex++; if (nextIndex < workstations.length) { pairs.push({ top: current, bottom: workstations[nextIndex] }); usedIndices.add(i); usedIndices.add(nextIndex); } else { pairs.push({ top: current, bottom: undefined }); usedIndices.add(i); } } } } return pairs; }, [workstations, isManualMode]);
+    const zigZagPairs = useMemo(() => { const pairs = []; const usedIndices = new Set<number>(); if (isManualMode) { for (let i = 0; i < workstations.length; i += 2) { const top = workstations[i]; const bottom = workstations[i + 1]; pairs.push({ top, bottom }); } } else { for (let i = 0; i < workstations.length; i++) { if (usedIndices.has(i)) continue; const current = workstations[i]; if (current.machine === 'VIDE') continue; let bottomCandidateIndex = -1; if (current.isFeeder) { const targetBaseId = current.feedsInto; for (let j = i + 1; j < workstations.length; j++) { if (usedIndices.has(j)) continue; const candidate = workstations[j]; const candidateBaseId = candidate.id.split('__')[0]; if (candidateBaseId === targetBaseId) { bottomCandidateIndex = j; break; } } } if (bottomCandidateIndex !== -1) { pairs.push({ top: current, bottom: workstations[bottomCandidateIndex] }); usedIndices.add(i); usedIndices.add(bottomCandidateIndex); } else { let nextIndex = i + 1; while ((usedIndices.has(nextIndex) || (workstations[nextIndex] && workstations[nextIndex].machine === 'VIDE')) && nextIndex < workstations.length) nextIndex++; if (nextIndex < workstations.length) { pairs.push({ top: current, bottom: workstations[nextIndex] }); usedIndices.add(i); usedIndices.add(nextIndex); } else { pairs.push({ top: current, bottom: undefined }); usedIndices.add(i); } } } } return pairs; }, [workstations, isManualMode]);
     const wheatGroups = useMemo(() => { const groups = []; let currentGroup: { left: Workstation | null, right: Workstation | null } = { left: null, right: null }; workstations.forEach((st, i) => { if (!currentGroup.left) { currentGroup.left = st; } else { currentGroup.right = st; groups.push(currentGroup); currentGroup = { left: null, right: null }; } }); if (currentGroup.left) { groups.push(currentGroup); } return groups; }, [workstations]);
     const machinesSummary = useMemo(() => { const summary: Record<string, number> = {}; let total = 0; workstations.forEach(st => { const mName = st.machine.toUpperCase().includes('MAN') ? 'MAN' : st.machine; if (!summary[mName]) summary[mName] = 0; summary[mName] += 1; total += 1; }); return { counts: Object.entries(summary), total }; }, [workstations]);
 
@@ -1591,12 +1653,16 @@ export default function Implantation({
         const isSwapSource = swapSourceId === station.id; const isSwapTarget = swapSourceId && swapSourceId !== station.id; const isLinkSource = linkSource === station.id; const isLinkTargetCandidate = isLinking && linkSource && linkSource !== station.id;
         const cardHeightClass = isGrid ? 'min-h-[140px]' : (isMini ? 'min-h-[80px]' : 'h-full min-h-[140px]'); const cardWidthClass = isMini ? 'w-full' : (isGrid ? 'w-full' : 'w-44 sm:w-48 shrink-0'); const miniCardStyle = isMini ? `${color.bg} ${color.border} border-2` : `bg-white border-2`; const cursorClass = (canEdit && isManualMode && !swapSourceId && !isLinking && !isSpacePressed) ? 'cursor-move' : 'cursor-default';
 
-        // MODIFIED: Make Vide slots behave like normal cards in free mode (draggable, context menu)
+        // MODIFIED: Make Vide slots behave like normal cards in auto/free modes (draggable, context menu)
         if (isVide && !isMini) {
             return (
                 <div
                     id={`station-card-${station.id}`}
-                    // Add drag events for Free Mode
+                    // Drag logic for AUTO modes (swapping)
+                    draggable={canEdit && isManualMode && !swapSourceId && !isLinking && layoutType !== 'free' && !isSpacePressed}
+                    onDragStart={(e) => handleDragStart(e, station.originalIndex, false, station.id)}
+                    onDragEnd={() => setDraggedStationIdx(null)}
+                    // Drag events for Free Mode
                     onMouseDown={(e) => layoutType === 'free' && handleFreeStart(e, station.id, station.x || 0, station.y || 0)}
                     onTouchStart={(e) => layoutType === 'free' && handleFreeStart(e, station.id, station.x || 0, station.y || 0)}
                     // Keep Drop Logic
@@ -1604,7 +1670,7 @@ export default function Implantation({
                     onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(e, station.originalIndex); }}
                     // Context Menu
                     onContextMenu={(e) => { handleContextMenu(e, station); }}
-                    className={`relative rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center gap-2 group z-10 transition-all ${cardWidthClass} ${cardHeightClass} ${isManualMode && !isSpacePressed ? 'hover:bg-indigo-50 hover:border-indigo-300' : ''} ${layoutType === 'free' ? 'cursor-move hover:shadow-lg' : ''}`}
+                    className={`relative rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center gap-2 group z-10 transition-all ${(canEdit && isManualMode && !swapSourceId && !isLinking && !isSpacePressed && layoutType !== 'free') ? 'cursor-move' : ''} ${cardWidthClass} ${cardHeightClass} ${isManualMode && !isSpacePressed ? 'hover:bg-indigo-50 hover:border-indigo-300' : ''} ${layoutType === 'free' ? 'cursor-move hover:shadow-lg' : ''}`}
                 >
                     <div className="text-[10px] font-bold text-slate-400 uppercase pointer-events-none">Emplacement Vide</div>
 
@@ -1632,7 +1698,8 @@ export default function Implantation({
                 onDragEnd={() => setDraggedStationIdx(null)}
                 onDragOver={handleDragOver}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(e, station.originalIndex); }}
-                className={`relative rounded-xl overflow-hidden group z-10 shadow-sm ${cardWidthClass} ${cardHeightClass} ${canEdit && isManualMode && !isLinking && layoutType !== 'free' && !isSpacePressed ? 'hover:-translate-y-1 hover:shadow-lg' : ''} ${cursorClass} ${isActive ? 'ring-4 ring-emerald-400 border-emerald-500 scale-105 shadow-xl z-20' : isLinkSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-30 animate-pulse' : isLinkTargetCandidate ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isSwapSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-30' : isSwapTarget ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isPassed ? 'border-emerald-200 opacity-90' : (isMini ? color.border : color.border)} ${isBroken ? 'ring-2 ring-rose-500 border-rose-600 bg-rose-50' : ''} ${miniCardStyle} transition-all duration-300 flex flex-col select-none`}
+                // Added z-10 and relative positioning to ensure cards are above the SVG lines
+                className={`relative rounded-xl overflow-hidden group shadow-sm z-10 bg-white ${cardWidthClass} ${cardHeightClass} ${canEdit && isManualMode && !isLinking && layoutType !== 'free' && !isSpacePressed ? 'hover:-translate-y-1 hover:shadow-lg' : ''} ${cursorClass} ${isActive ? 'ring-4 ring-emerald-400 border-emerald-500 scale-105 shadow-xl z-20' : isLinkSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-20 animate-pulse' : isLinkTargetCandidate ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isSwapSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-20' : isSwapTarget ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isPassed ? 'border-emerald-200 opacity-90' : (isMini ? color.border : color.border)} ${isBroken ? 'ring-2 ring-rose-500 border-rose-600 bg-rose-50' : ''} ${miniCardStyle} transition-all duration-300 flex flex-col select-none`}
             >
                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isActive ? 'bg-emerald-500' : (isBroken ? 'bg-rose-500' : color.fill)}`}></div>
                 <div className={`px-2 pl-3 py-1.5 flex justify-between items-center ${isActive ? 'bg-emerald-500' : (isPassed ? 'bg-emerald-50' : (isMini ? color.bg : color.bg))} border-b ${isActive ? 'border-emerald-600' : color.border} transition-colors duration-500 relative`}>
@@ -1642,6 +1709,21 @@ export default function Implantation({
                         <span className={`text-[10px] font-black ${isActive ? 'text-emerald-600 bg-white' : color.text} w-5 h-5 flex items-center justify-center bg-white rounded-md shadow-sm border border-black/5`}> {station.name.replace('P', '').split('.')[0]} </span>
                         <span className={`text-[9px] font-black uppercase truncate max-w-[80px] ${isActive ? 'text-white' : color.text}`} title={station.name}> {station.machine} </span>
                     </div>
+
+                    {/* DELETE LINK BUTTON ON CARD */}
+                    {showLinks && manualLinks && manualLinks.some(l => l.from === station.id || l.to === station.id) && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const linkToDelete = manualLinks.find(l => l.from === station.id || l.to === station.id);
+                                if (linkToDelete) handleRemoveLink(linkToDelete.id);
+                            }}
+                            className="p-1 rounded-full bg-rose-500 text-white shadow-md hover:bg-rose-600 transition-colors z-30"
+                            title="Supprimer la liaison"
+                        >
+                            <Unlink2 className="w-2.5 h-2.5" />
+                        </button>
+                    )}
 
                     {!isMini && (
                         <div className="ml-auto mr-1 flex items-center gap-1">
@@ -1740,188 +1822,139 @@ export default function Implantation({
             {/* FULLSCREEN WRAPPER */}
             <div ref={fullscreenWrapperRef} className={`flex flex-col flex-1 min-h-0 relative transition-all duration-300 ${isFullScreen ? 'bg-white p-4 overflow-hidden fixed inset-0 z-[5000]' : ''}`}>
 
-                {/* TOOLBAR */}
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-1 flex flex-wrap items-center justify-between gap-2 shrink-0 z-30 mb-1 relative">
+                {/* --- LIVE COUNTER WIDGET --- */}
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+                    <div className="bg-slate-800/90 backdrop-blur-md text-white px-5 py-2 rounded-full shadow-lg border border-slate-700/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-4">
+                        <Calculator className="w-4 h-4 text-emerald-400" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">Machines Placées</span>
+                        <div className="flex items-center justify-center w-7 h-7 bg-white/10 rounded-full font-black text-sm text-emerald-400">
+                            {placedMachinesCount}
+                        </div>
+                    </div>
+                </div>
 
-                    {/* --- GROUP 1: MODES (LEFT) --- */}
-                    <div className="flex items-center gap-2">
-                        {/* AUTO MODE */}
-                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                {/* TOOLBAR (CLEANED UP & ORGANIZED) */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap items-center justify-between gap-4 shrink-0 z-30 mb-2 mt-4 relative">
+
+                    {/* LEFT: Modes & Auto Refresh */}
+                    <div className="flex items-center gap-3">
+                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
                             <button
                                 onClick={activateAutoMode}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${!isManualMode ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                title="Calcul Automatique"
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-sm ${!isManualMode ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                             >
-                                <Bot className="w-3.5 h-3.5" />
-                                Mode Auto
+                                <Bot className="w-4 h-4" /> <span className="hidden lg:inline">Mode Auto</span><span className="lg:hidden">Auto</span>
                             </button>
-                            <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
-                            <button
-                                onClick={refreshAuto}
-                                disabled={isManualMode}
-                                className={`p-1.5 rounded-md transition-colors ${!isManualMode ? 'hover:bg-white text-slate-500 hover:text-emerald-600' : 'text-slate-300 cursor-not-allowed'}`}
-                                title="Actualiser l'Auto-Équilibrage"
-                            >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
-
-                        {/* MANUAL MODE & LINKING */}
-                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 relative">
                             <button
                                 onClick={activateManualMode}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${isManualMode ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                title="Modification Manuelle"
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-sm ${isManualMode ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                             >
-                                <Hand className="w-3.5 h-3.5" />
-                                Mode Manuel
+                                <Hand className="w-4 h-4" /> <span className="hidden lg:inline">Mode Manuel</span><span className="lg:hidden">Manuel</span>
                             </button>
-                            {isManualMode && (
-                                <>
-                                    <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
+                        </div>
 
-                                    {/* LAYOUT ASSISTANT TOGGLE (NEW) */}
-                                    <button
-                                        onClick={() => setIsLayoutMenuOpen(!isLayoutMenuOpen)}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${isLayoutMenuOpen ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-slate-700'}`}
-                                        title="Ouvrir les outils de disposition"
-                                    >
-                                        <LayoutTemplate className="w-3.5 h-3.5" />
-                                        Disposition
-                                        <ChevronDown className={`w-3 h-3 transition-transform ${isLayoutMenuOpen ? 'rotate-180' : ''}`} />
-                                    </button>
+                        {!isManualMode && (
+                            <button onClick={refreshAuto} title="Actualiser la distribution" className="flex items-center justify-center p-3 bg-emerald-50/80 border border-emerald-200 text-emerald-600 font-bold rounded-xl hover:bg-emerald-100 transition-colors shadow-sm active:scale-95">
+                                <RefreshCw className="w-4 h-4" />
+                            </button>
+                        )}
 
-                                    {/* EXPANDABLE LAYOUT BAR (VISIBLE ONLY WHEN TOGGLED) */}
-                                    {isLayoutMenuOpen && (
-                                        <div className="absolute top-full left-0 mt-2 p-1.5 bg-white rounded-xl shadow-xl border border-slate-200 z-50 flex items-center gap-2 animate-in slide-in-from-top-2 min-w-[300px]">
-                                            {/* Standard Layouts */}
-                                            <div className="flex items-center gap-1 pr-2 border-r border-slate-100">
-                                                <button onClick={() => handleLayoutChange('zigzag')} className={`p-1.5 rounded-md transition-all ${layoutType === 'zigzag' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`} title="U (Zigzag)">
-                                                    <span className="text-[9px] font-bold">U (Standard)</span>
-                                                </button>
-                                                <button onClick={() => handleLayoutChange('line')} className={`p-1.5 rounded-md transition-all ${layoutType === 'line' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`} title="2Line">
-                                                    <span className="text-[9px] font-bold">2Line</span>
-                                                </button>
-                                            </div>
+                        {isManualMode && (
+                            <div className="flex items-center bg-slate-50 p-1 rounded-xl border border-slate-200">
+                                <button onClick={addSingleEmptySlot} className="p-2 text-slate-500 hover:text-emerald-600 transition-colors" title="Ajouter Poste Vide"><Plus className="w-4 h-4" /></button>
+                                <div className="w-px h-6 bg-slate-200 mx-1"></div>
+                                <button onClick={compactPostes} className="p-2 text-slate-500 hover:text-blue-600 transition-colors" title="Compacter"><Maximize2 className="w-4 h-4" /></button>
+                            </div>
+                        )}
+                    </div>
 
-                                            {/* Free Mode Assistants - Only visible when Free Mode is active */}
-                                            {layoutType === 'free' && (
-                                                <div className="flex items-center gap-1 animate-in fade-in zoom-in duration-200">
-                                                    <button onClick={() => applyLayoutPattern('U')} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-50 hover:text-indigo-600" title="Arranger en U">
-                                                        <Columns className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => applyLayoutPattern('GRID')} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-50 hover:text-indigo-600" title="Arranger en Grille">
-                                                        <LayoutGrid className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => applyLayoutPattern('CIRCLE')} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-50 hover:text-indigo-600" title="Arranger en Cercle">
-                                                        <CircleDashed className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => applyLayoutPattern('LINE')} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-50 hover:text-indigo-600" title="Arranger en Ligne">
-                                                        <AlignIcon className="w-4 h-4 rotate-90" />
-                                                    </button>
-                                                    <div className="w-px h-4 bg-slate-200 mx-1"></div>
-                                                </div>
-                                            )}
+                    {/* CENTER: Layout Styles */}
+                    <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 shadow-inner overflow-x-auto no-scrollbar">
+                        {[
+                            { id: 'zigzag', label: 'U (Lignes)', icon: LayoutDashboard },
+                            { id: 'line', label: 'Ligne', icon: AlignHorizontalSpaceAround },
+                            { id: 'snake', label: 'Serpent', icon: AlignIcon },
+                            { id: 'grid', label: 'Grille', icon: GridIcon },
+                            { id: 'free', label: 'Libre', icon: Move },
+                        ].map((item) => (
+                            <button
+                                key={item.id}
+                                onClick={() => handleLayoutChange(item.id as any)}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${layoutType === item.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-indigo-600'}`}
+                            >
+                                <item.icon className="w-4 h-4" />
+                                <span className="hidden xl:inline">{item.label}</span>
+                            </button>
+                        ))}
+                    </div>
 
-                                            <button
-                                                onClick={() => { handleLayoutChange('free'); setIsManualMode(true); }}
-                                                className={`px-2 py-1 flex items-center gap-1 rounded-md text-[10px] font-bold transition-all ${layoutType === 'free' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-50'}`}
-                                            >
-                                                <Move className="w-3 h-3" /> Libre
-                                            </button>
-                                        </div>
-                                    )}
+                    {/* RIGHT: Actions (Free mode tools + Export) */}
+                    <div className="flex items-center gap-3">
+                        {isManualMode && layoutType === 'free' && (
+                            <div className="hidden lg:flex items-center bg-violet-50 p-1 rounded-xl border border-violet-200 shadow-inner">
+                                <span className="text-[10px] font-black tracking-wider text-violet-400 px-2 uppercase">Assistant</span>
+                                <button onClick={() => applyLayoutPattern('U')} className="p-2 rounded-lg text-violet-600 hover:bg-white transition-colors" title="Forme U"><Columns className="w-4 h-4" /></button>
+                                <button onClick={() => applyLayoutPattern('GRID')} className="p-2 rounded-lg text-violet-600 hover:bg-white transition-colors" title="Grille"><LayoutGrid className="w-4 h-4" /></button>
+                                <button onClick={() => applyLayoutPattern('CIRCLE')} className="p-2 rounded-lg text-violet-600 hover:bg-white transition-colors" title="Cercle"><CircleDashed className="w-4 h-4" /></button>
+                            </div>
+                        )}
 
-                                    <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
+                        {/* --- NEW: MAGNETIC SNAP TOGGLE --- */}
+                        {isManualMode && layoutType === 'free' && (
+                            <button
+                                onClick={toggleMagnetic}
+                                title="Alignement Magnétique"
+                                className={`flex items-center justify-center p-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isMagnetic ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:text-indigo-600 active:scale-95'}`}
+                            >
+                                <Magnet className={`w-5 h-5 ${isMagnetic ? 'rotate-180 drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]' : ''} transition-transform duration-300`} />
+                            </button>
+                        )}
 
-                                    <button
-                                        onClick={addSingleEmptySlot}
-                                        className="p-1.5 rounded-md transition-colors text-slate-500 hover:text-emerald-600 hover:bg-white"
-                                        title="Ajouter un Emplacement Vide (Manuellement)"
-                                    >
-                                        <Plus className="w-3.5 h-3.5" />
-                                    </button>
+                        {isManualMode && (
+                            <button onClick={() => setIsLinking(!isLinking)} title="Mode Liaison (Flux)" className={`flex items-center justify-center p-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isLinking ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:text-indigo-600 active:scale-95'}`}>
+                                <MousePointerClick className="w-5 h-5" />
+                            </button>
+                        )}
 
-                                    <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
+                        <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 shadow-inner">
+                            {/* Materials Panel Toggle (Machine Counter) */}
+                            <button onClick={() => setShowMaterialsPanel(!showMaterialsPanel)} className={`p-2 rounded-lg transition-colors shadow-sm ${showMaterialsPanel ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 hover:text-indigo-600 border border-slate-100'}`} title="Compteur de machines">
+                                <Calculator className="w-4 h-4" />
+                            </button>
 
-                                    <button
-                                        onClick={() => setIsLinking(!isLinking)}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${isLinking ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-indigo-600'}`}
-                                        title={isLinking ? "Désactiver Mode Liaison" : "Activer Mode Liaison (Tracer Flux)"}
-                                    >
-                                        <MousePointerClick className="w-3.5 h-3.5" />
-                                        <span className="hidden sm:inline">Liaison</span>
-                                    </button>
-                                    <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
-                                    <button
-                                        onClick={() => setShowLinks(!showLinks)}
-                                        className={`p-1.5 rounded-md transition-colors ${showLinks ? 'hover:bg-white text-indigo-500' : 'text-slate-400 hover:text-slate-600'}`}
-                                        title={showLinks ? "Masquer les lignes" : "Afficher les lignes"}
-                                    >
-                                        {showLinks ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                                    </button>
+                            {/* Load / Save Layout History */}
+                            <button onClick={() => setShowLoadTemplateModal(true)} className="p-2 rounded-lg bg-white text-slate-500 hover:text-indigo-600 border border-slate-100 transition-colors shadow-sm" title="Ouvrir un plan sauvegardé">
+                                <FolderOpen className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => setShowSaveTemplateModal(true)} className="p-2 rounded-lg bg-white text-slate-500 hover:text-emerald-600 border border-slate-100 transition-colors shadow-sm" title="Sauvegarder le plan actuel">
+                                <Save className="w-4 h-4" />
+                            </button>
 
-                                    <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
+                            {/* Clear Canvas Button for Free Mode */}
+                            {isManualMode && layoutType === 'free' && (
+                                <button
+                                    onClick={() => {
+                                        if (confirm("Voulez-vous vraiment effacer le plan libre ? Tous les postes retourneront dans la file d'attente.")) {
+                                            setPostes(prev => prev.map(p => ({ ...p, isPlaced: false, x: undefined, y: undefined })));
+                                            if (setManualLinks) setManualLinks([]);
+                                        }
+                                    }}
+                                    className="p-2 rounded-lg bg-white text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 transition-colors shadow-sm"
+                                    title="Effacer le plan"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            )}
 
-                                    {/* SAVE TEMPLATE BUTTON */}
-                                    {layoutType === 'free' && (
-                                        <>
-                                            <button
-                                                onClick={() => setShowSaveTemplateModal(true)}
-                                                className={`p-1.5 rounded-md transition-colors relative hover:bg-white text-slate-500 hover:text-amber-600`}
-                                                title="Sauvegarder ce Gabarit (Template)"
-                                            >
-                                                <Save className="w-3.5 h-3.5" />
-                                                {saveSuccess && <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>}
-                                            </button>
-                                            <button
-                                                onClick={() => setShowLoadTemplateModal(true)}
-                                                className={`p-1.5 rounded-md transition-colors hover:bg-white text-slate-500 hover:text-indigo-600`}
-                                                title="Charger un Gabarit"
-                                            >
-                                                <FolderOpen className="w-3.5 h-3.5" />
-                                            </button>
-                                        </>
-                                    )}
-                                </>
+                            <button onClick={handleExportPlan} className="px-3 py-2 bg-white rounded-lg flex items-center gap-2 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-100 transition-colors shadow-sm text-slate-700 text-xs font-bold whitespace-nowrap">
+                                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />} <span className="hidden sm:inline">Exporter</span>
+                            </button>
+                            {onSave && (
+                                <button onClick={() => { onSave(); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 2500); }} className="px-3 py-2 bg-slate-800 text-white rounded-lg flex items-center gap-2 border border-slate-700 hover:bg-emerald-600 hover:border-emerald-600 transition-colors shadow-sm text-xs font-bold whitespace-nowrap active:scale-95">
+                                    {saveSuccess ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />} <span className="hidden sm:inline">{saveSuccess ? 'Sauvé' : 'Sauver'}</span>
+                                </button>
                             )}
                         </div>
-                    </div>
-
-                    {/* ... (Center & Right Toolbars remain same) ... */}
-                    <div className="flex items-center gap-2">
-                        {/* Layout Type - REMOVED AS IT IS NOW IN THE TOGGLE MENU */}
-                        {/* Orientation */}
-                        <div className="flex items-center bg-slate-50 p-0.5 rounded-lg border border-slate-200">
-                            <button onClick={() => setOrientation('landscape')} className={`p-1 rounded-md transition-all ${orientation === 'landscape' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`} title="Horizontal"><AlignHorizontalSpaceAround className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setOrientation('portrait')} className={`p-1 rounded-md transition-all ${orientation === 'portrait' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`} title="Vertical"><AlignVerticalSpaceAround className="w-3.5 h-3.5" /></button>
-                        </div>
-                    </div>
-
-                    {/* --- GROUP 3: TOOLS (RIGHT) --- */}
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <div className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
-                            <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))} className="p-1 hover:bg-white rounded text-slate-500"><ZoomOut className="w-3 h-3" /></button>
-                            <span className="text-[9px] font-bold text-slate-400 w-8 text-center">{Math.round(zoom * 100)}%</span>
-                            <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="p-1 hover:bg-white rounded text-slate-500"><ZoomIn className="w-3 h-3" /></button>
-                        </div>
-
-                        <button onClick={() => setShowMaterialsPanel(!showMaterialsPanel)} className={`p-1.5 rounded-lg border transition-all ${showMaterialsPanel ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-500'}`} title="Matériel"><Calculator className="w-3.5 h-3.5" /></button>
-                        <button onClick={toggleFullScreen} className="p-1.5 rounded-lg border bg-white border-slate-200 text-slate-500 hover:text-indigo-600 transition-all" title="Plein Écran">
-                            {isFullScreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
-                        </button>
-
-                        {/* EXPORT PLAN IMAGE BUTTON */}
-                        <button
-                            onClick={handleExportPlan}
-                            disabled={isExporting}
-                            className={`p-1.5 rounded-lg border bg-white border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-200 transition-all ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            title="Exporter le plan (Image/PDF)"
-                        >
-                            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImageIcon className="w-3.5 h-3.5" />}
-                        </button>
-
-                        <button onClick={() => window.print()} className="p-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-900 transition-colors shadow-sm" title="Imprimer"><Printer className="w-3.5 h-3.5" /></button>
                     </div>
                 </div>
 
@@ -2127,14 +2160,14 @@ export default function Implantation({
                                 className={`transition-transform duration-200 ease-out origin-top-left relative ${layoutType === 'grid' ? 'w-full' : 'min-w-max'}`}
                                 style={{ transform: `scale(${zoom})` }}
                             >
-                                {/* SVG OVERLAY FOR MANUAL LINKS - MOVED INSIDE */}
+                                {/* SVG OVERLAY - inside zoomed contentRef, uses scrollContainerRef for scroll offsets */}
                                 {manualLinks && (
                                     <LinkOverlay
                                         links={manualLinks}
                                         stations={workstations}
                                         showLinks={showLinks}
                                         zoom={zoom}
-                                        containerRef={contentRef} // Passing the scaled container ref
+                                        containerRef={scrollContainerRef}
                                         onRemoveLink={handleRemoveLink}
                                         onEditLabel={handleEditLinkLabel}
                                     />
@@ -2256,52 +2289,80 @@ export default function Implantation({
                                     </div>
                                 )}
 
-                                {/* FIXED: Combine Zigzag and Snake layouts (U-shape) */}
+                                {/* FIXED: Zigzag U-Shape Layout - Proper aligned pairs with flow indicators */}
                                 {(layoutType === 'zigzag' || layoutType === 'snake') && (
-                                    <div className={`flex gap-3 pb-20 min-w-max ${orientation === 'landscape' ? 'flex-col items-start' : 'flex-row items-start pl-4'}`}>
+                                    <div className={`flex gap-6 pb-20 min-w-max ${orientation === 'landscape' ? 'flex-col items-center pt-8' : 'flex-row items-start pl-8'}`}>
                                         <div className="relative">
+                                            {/* Production Path Arrow SVG Background (Conceptual U-Turn) */}
+                                            <div className="absolute -inset-4 border-2 border-slate-200 border-dashed rounded-[40px] opacity-20 -z-10 pointer-events-none" />
 
-                                            <div className={`flex shrink-0 ${orientation === 'landscape' ? 'flex-row pl-12 mb-2 w-full gap-[12rem]' : 'flex-col pt-12 mr-4 w-12 gap-16'}`}>
-                                                {zigZagPairs.map((pair, idx) => (
-                                                    <div key={idx} className={`flex items-center justify-center text-[10px] font-black text-slate-300 uppercase ${orientation === 'landscape' ? 'w-48 text-center' : 'h-28 -rotate-90'}`}>
-                                                        {orientation === 'landscape' ? `Col ${idx + 1}` : `Rang ${idx + 1}`}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className={`flex items-start gap-12 relative z-10 ${orientation === 'landscape' ? 'flex-row' : 'flex-col'}`}>
+                                            <div className={`flex items-stretch gap-6 relative z-10 ${orientation === 'landscape' ? 'flex-row' : 'flex-col'}`}>
                                                 {zigZagPairs.map((pair, i) => {
                                                     const isLastCol = i === zigZagPairs.length - 1;
-                                                    const topIdx = pair.top.originalIndex;
-                                                    const botIdx = pair.bottom?.originalIndex;
-
-                                                    const isCluster = pair.top.isFeeder && pair.bottom && pair.top.feedsInto === pair.bottom.id.split('__')[0];
+                                                    const isEven = i % 2 === 0;
 
                                                     return (
-                                                        <div key={i} className={`flex gap-20 relative ${orientation === 'landscape' ? 'flex-col' : 'flex-row items-center items-stretch'}`}>
-                                                            {showDimensions && (<div className={`absolute ${orientation === 'landscape' ? '-top-6 left-1/2 -translate-x-1/2 w-0.5 h-[150%]' : 'left-1/2 top-1/2 -translate-y-1/2 h-0.5 w-[150%]'} bg-yellow-400/30 z-0`}></div>)}
-
-                                                            <div className="relative">
+                                                        <div key={i} className={`flex relative ${orientation === 'landscape' ? 'flex-col items-center gap-0' : 'flex-row items-center gap-0'}`}>
+                                                            {/* COL LABEL REMOVED AS REQUESTED IN PHASE 25 */}
+                                                            {/* TOP CARD */}
+                                                            <div className="relative z-10 transition-transform hover:scale-[1.02]">
                                                                 <StationCard station={pair.top} />
-                                                                {showDimensions && <div className="absolute -top-5 left-0 w-full text-center text-[8px] font-bold text-yellow-600 bg-yellow-50 rounded">Rail Élec.</div>}
-
-                                                                {/* VISUAL CONNECTOR 1: REMOVED */}
                                                             </div>
 
-                                                            {/* Bottom Card Wrapper with SHIFT */}
-                                                            <div className={`relative ${orientation === 'landscape' ? 'translate-x-32' : ''}`}>
-                                                                {pair.bottom ? (<><StationCard station={pair.bottom} />{showDimensions && !isLastCol && (<div className={`absolute ${orientation === 'landscape' ? 'top-1/2 -right-6 w-6 h-px' : 'left-1/2 -bottom-6 h-6 w-px'} bg-slate-300 flex items-center justify-center`}><div className={`text-[7px] bg-slate-100 text-slate-500 font-bold px-0.5 rounded ${orientation === 'landscape' ? 'transform -rotate-90' : ''}`}>1.2m</div></div>)}</>) : (
-                                                                    !isManualMode && <div className="w-36 sm:w-40 h-16 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-300 font-bold uppercase">Zone Tampon</div>
+                                                            {/* CONNECTOR with Direction Arrow between TOP and BOTTOM */}
+                                                            <div className={`${orientation === 'landscape' ? 'w-1 h-10 bg-slate-200 mx-auto relative' : 'h-1 w-10 bg-slate-200 my-auto relative'}`}>
+                                                                <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-slate-200 rounded-full p-0.5 shadow-sm z-20`}>
+                                                                    {pair.bottom && (
+                                                                        <ArrowDown className={`w-3 h-3 ${orientation === 'landscape' ? 'text-indigo-400' : 'rotate-[-90deg] text-indigo-400'}`} />
+                                                                    )}
+                                                                </div>
+                                                                {/* Flow line animation */}
+                                                                <div className="absolute inset-0 overflow-hidden">
+                                                                    <div className={`absolute inset-0 bg-indigo-500 opacity-20 ${isEven ? 'animate-pulse' : ''}`} />
+                                                                </div>
+                                                            </div>
+
+                                                            {/* BOTTOM CARD */}
+                                                            <div className="relative z-10 transition-transform hover:scale-[1.02]">
+                                                                {pair.bottom ? (
+                                                                    <StationCard station={pair.bottom} />
+                                                                ) : (
+
+                                                                    <div className="w-48 h-[140px] border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-300 bg-white/50">
+                                                                        <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-200 flex items-center justify-center">
+                                                                            <Plus className="w-4 h-4" />
+                                                                        </div>
+                                                                        <span className="text-[10px] font-bold uppercase tracking-wider">Emplacement Vide</span>
+                                                                    </div>
+
                                                                 )}
-                                                                {showDimensions && !isLastCol && pair.bottom && (<div className={`absolute ${orientation === 'landscape' ? 'top-1/2 -right-6 w-6' : 'left-1/2 -bottom-6 h-6'}`}>{orientation === 'landscape' ? <DimensionMarkerHorizontal label="0.6m" /> : <DimensionMarkerVertical label="0.6m" />}</div>)}
-
-                                                                {/* VISUAL CONNECTOR 2: REMOVED */}
                                                             </div>
+
+                                                            {/* FLOW ARROW / HORIZONTAL CONNECTOR to next column */}
+                                                            {!isLastCol && (
+                                                                <div className={`absolute z-20 flex items-center justify-center ${orientation === 'landscape'
+                                                                    ? `bottom-[-20px] right-[-15px] translate-x-full`
+                                                                    : 'right-[-25px] top-1/2 -translate-y-1/2 translate-x-full'
+                                                                    }`}>
+                                                                    <div className="flex items-center gap-1 opacity-40">
+                                                                        <ChevronRight className="w-5 h-5 text-indigo-300" />
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     );
                                                 })}
-                                                <div className={`flex flex-col justify-end h-full pb-6 pl-3 ${orientation === 'landscape' ? '' : 'pt-6'}`}>
-                                                    <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-white rounded-lg shadow-lg">
-                                                        <Truck className="w-4 h-4" /> <span className="text-xs font-bold uppercase">Expédition</span>
+
+                                                {/* Expédition at the heart of the U-Turn or at the end */}
+                                                <div className={`flex items-center justify-center ${orientation === 'landscape' ? 'self-center ml-12' : 'mt-12'}`}>
+                                                    <div className="flex items-center gap-3 px-6 py-4 bg-slate-800 text-white rounded-2xl shadow-xl border border-slate-700 hover:bg-slate-900 transition-colors group">
+                                                        <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center group-hover:bg-emerald-500 transition-colors">
+                                                            <Truck className="w-6 h-6" />
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[10px] font-bold text-slate-400 uppercase leading-tight">Destination</span>
+                                                            <span className="text-sm font-black uppercase tracking-widest">EXPÉDITION</span>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2320,7 +2381,7 @@ export default function Implantation({
                                     <div className="flex flex-col gap-12 p-8 w-full">
                                         {/* Line 1 */}
                                         <div className="flex items-center gap-4">
-                                            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs shrink-0">L1</div>
+
                                             <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 border-b border-dashed border-slate-200 w-full custom-scrollbar">
                                                 {workstations.slice(0, Math.ceil(workstations.length / 2)).map(st => (
                                                     <div key={st.id} className="shrink-0">
@@ -2332,7 +2393,7 @@ export default function Implantation({
 
                                         {/* Line 2 */}
                                         <div className="flex items-center gap-4">
-                                            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-bold text-xs shrink-0">L2</div>
+
                                             <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 w-full custom-scrollbar">
                                                 {workstations.slice(Math.ceil(workstations.length / 2)).map(st => (
                                                     <div key={st.id} className="shrink-0">
