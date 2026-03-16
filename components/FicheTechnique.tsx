@@ -98,6 +98,7 @@ export default function FicheTechnique({
         }));
     };
     const [newColorInput, setNewColorInput] = useState('');
+    const [pickedHexColor, setPickedHexColor] = useState('#10b981');
 
     // Key format: "colorId_sizeIndex" -> value: number
     const gridQuantities = data.gridQuantities || {};
@@ -209,6 +210,70 @@ export default function FicheTechnique({
         if (!newColorInput.trim()) return;
         setColors(prev => [...prev, { id: Date.now().toString(), name: newColorInput.trim() }]);
         setNewColorInput('');
+    };
+
+    // Smart color name detection from hex
+    const hexToColorName = (hex: string): string => {
+        const h = hex.replace('#', '');
+        const r = parseInt(h.substring(0, 2), 16);
+        const g = parseInt(h.substring(2, 4), 16);
+        const b = parseInt(h.substring(4, 6), 16);
+        const namedColors: { name: string; r: number; g: number; b: number }[] = [
+            { name: 'Noir', r: 0, g: 0, b: 0 },
+            { name: 'Blanc', r: 255, g: 255, b: 255 },
+            { name: 'Rouge', r: 255, g: 0, b: 0 },
+            { name: 'Rouge Foncé', r: 139, g: 0, b: 0 },
+            { name: 'Bordeaux', r: 128, g: 0, b: 32 },
+            { name: 'Cramoisi', r: 220, g: 20, b: 60 },
+            { name: 'Rose', r: 255, g: 105, b: 180 },
+            { name: 'Rose Clair', r: 255, g: 182, b: 193 },
+            { name: 'Fuchsia', r: 255, g: 0, b: 255 },
+            { name: 'Orange', r: 255, g: 165, b: 0 },
+            { name: 'Orange Foncé', r: 255, g: 140, b: 0 },
+            { name: 'Corail', r: 255, g: 127, b: 80 },
+            { name: 'Saumon', r: 250, g: 128, b: 114 },
+            { name: 'Jaune', r: 255, g: 255, b: 0 },
+            { name: 'Jaune Doré', r: 255, g: 215, b: 0 },
+            { name: 'Jaune Pâle', r: 255, g: 255, b: 224 },
+            { name: 'Vert', r: 0, g: 128, b: 0 },
+            { name: 'Vert Clair', r: 144, g: 238, b: 144 },
+            { name: 'Vert Foncé', r: 0, g: 100, b: 0 },
+            { name: 'Vert Émeraude', r: 16, g: 185, b: 129 },
+            { name: 'Lime', r: 0, g: 255, b: 0 },
+            { name: 'Olive', r: 128, g: 128, b: 0 },
+            { name: 'Kaki', r: 189, g: 183, b: 107 },
+            { name: 'Turquoise', r: 64, g: 224, b: 208 },
+            { name: 'Cyan', r: 0, g: 255, b: 255 },
+            { name: 'Bleu Ciel', r: 135, g: 206, b: 235 },
+            { name: 'Bleu', r: 0, g: 0, b: 255 },
+            { name: 'Bleu Royal', r: 65, g: 105, b: 225 },
+            { name: 'Bleu Marine', r: 0, g: 0, b: 128 },
+            { name: 'Indigo', r: 75, g: 0, b: 130 },
+            { name: 'Violet', r: 128, g: 0, b: 128 },
+            { name: 'Lavande', r: 230, g: 230, b: 250 },
+            { name: 'Mauve', r: 224, g: 176, b: 255 },
+            { name: 'Marron', r: 139, g: 69, b: 19 },
+            { name: 'Chocolat', r: 210, g: 105, b: 30 },
+            { name: 'Beige', r: 245, g: 245, b: 220 },
+            { name: 'Crème', r: 255, g: 253, b: 208 },
+            { name: 'Ivoire', r: 255, g: 255, b: 240 },
+            { name: 'Gris', r: 128, g: 128, b: 128 },
+            { name: 'Gris Clair', r: 192, g: 192, b: 192 },
+            { name: 'Gris Foncé', r: 64, g: 64, b: 64 },
+            { name: 'Argent', r: 192, g: 192, b: 192 },
+        ];
+        let closest = namedColors[0];
+        let minDist = Infinity;
+        for (const c of namedColors) {
+            const dist = Math.sqrt((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2);
+            if (dist < minDist) { minDist = dist; closest = c; }
+        }
+        return closest.name;
+    };
+
+    const addVisualColor = (hex: string) => {
+        const detectedName = hexToColorName(hex);
+        setColors(prev => [...prev, { id: hex, name: detectedName }]);
     };
 
     const removeColor = (id: string) => {
@@ -364,23 +429,47 @@ export default function FicheTechnique({
                                 </div>
 
                                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                                    {/* ADD COLOR INPUT */}
-                                    <div className="bg-slate-50 p-2 border-b border-slate-200 flex gap-2">
-                                        <div className="relative w-full md:w-64 flex items-center bg-white border border-slate-200 rounded-lg focus-within:border-indigo-400 px-3">
-                                            <Palette className="w-3 h-3 text-slate-400 mr-2 z-20 relative" />
+                                    {/* ADD COLOR INPUT — Unified bar */}
+                                    <div className="bg-slate-50 p-2.5 border-b border-slate-200 flex flex-wrap gap-2 items-center">
+                                        {/* Color Swatch Picker */}
+                                        <label className="relative flex items-center justify-center cursor-pointer shrink-0" title="Choisir une couleur">
+                                            <input
+                                                type="color"
+                                                value={pickedHexColor}
+                                                onChange={(e) => setPickedHexColor(e.target.value)}
+                                                className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                                            />
+                                            <div className="w-6 h-6 rounded-md border-2 border-slate-300 shadow-sm cursor-pointer hover:scale-110 transition-transform" style={{ backgroundColor: pickedHexColor }}></div>
+                                        </label>
+                                        {/* Auto-detected name badge */}
+                                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[11px] font-black rounded-md whitespace-nowrap">
+                                            {hexToColorName(pickedHexColor)}
+                                        </span>
+                                        {/* Text input */}
+                                        <div className="relative flex-1 min-w-[120px] flex items-center bg-white border border-slate-200 rounded-lg focus-within:border-indigo-400 px-3 h-7">
+                                            <Palette className="w-3 h-3 text-slate-400 mr-2 z-20 relative shrink-0" />
                                             <ExcelInput
                                                 suggestions={TEXTILE_COLORS.map(c => c.value)}
-                                                placeholder="Nouvelle Couleur (ex: Noir...)"
-                                                className="text-xs py-1.5 outline-none w-full pl-6 pr-2"
+                                                placeholder="Nom couleur (ou laisser auto)..."
+                                                className="text-xs font-bold text-slate-700 outline-none w-full pl-6 pr-2"
                                                 containerClassName="absolute inset-0 flex items-center"
                                                 value={newColorInput}
                                                 onChange={(val) => setNewColorInput(val)}
-                                                onKeyDown={(e) => e.key === 'Enter' && addColor()}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        if (newColorInput.trim()) addColor();
+                                                        else addVisualColor(pickedHexColor);
+                                                    }
+                                                }}
                                             />
                                         </div>
+                                        {/* Add button */}
                                         <button
-                                            onClick={addColor}
-                                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors z-20"
+                                            onClick={() => {
+                                                if (newColorInput.trim()) addColor();
+                                                else addVisualColor(pickedHexColor);
+                                            }}
+                                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors z-20 h-7"
                                         >
                                             <Plus className="w-3 h-3" /> Ajouter
                                         </button>
@@ -428,7 +517,11 @@ export default function FicheTechnique({
                                                                     className={`w-3 h-3 rounded-full flex-shrink-0 shadow-sm ${c.id && c.id.startsWith('#') ? '' : 'bg-slate-300'}`}
                                                                     style={c.id && c.id.startsWith('#') ? { backgroundColor: c.id } : undefined}
                                                                 />
-                                                                <span className="truncate max-w-[150px]" title={c.name}>{c.name}</span>
+                                                                <span className="truncate max-w-[150px]" title={c.name}>
+                                                                    {c.id && c.id.startsWith('#') && (c.name.includes('personnalisé') || c.name.startsWith('#') || c.name.includes('rgb(') || c.name.includes('Couleur P'))
+                                                                        ? hexToColorName(c.id)
+                                                                        : c.name}
+                                                                </span>
                                                             </div>
                                                             <button onClick={() => removeColor(c.id)} className="text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity">
                                                                 <Trash2 className="w-3.5 h-3.5" />

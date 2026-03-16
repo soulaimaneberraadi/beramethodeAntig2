@@ -466,7 +466,16 @@ export default function Configuration({ settings, setSettings, lang }: Configura
                                         <div className="bg-emerald-50/50 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between border-b border-emerald-100 gap-3">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-xl bg-white border border-emerald-200 shadow-sm flex items-center justify-center text-emerald-600 font-black text-sm">{i + 1}</div>
-                                                <span className="font-black text-slate-800 tracking-wider text-base">{chainKey}</span>
+                                                <input
+                                                    type="text"
+                                                    value={settings.chainNames?.[chainKey] || chainKey}
+                                                    onChange={(e) => setSettings(prev => ({
+                                                        ...prev,
+                                                        chainNames: { ...(prev.chainNames || {}), [chainKey]: e.target.value || chainKey }
+                                                    }))}
+                                                    className="font-black text-slate-800 tracking-wider text-base bg-transparent border-b-2 border-transparent hover:border-emerald-300 focus:border-emerald-500 focus:bg-white px-1 outline-none transition-all w-32"
+                                                    placeholder="Nom de la chaîne..."
+                                                />
                                             </div>
                                             <button onClick={() => setSettings(prev => ({
                                                 ...prev,

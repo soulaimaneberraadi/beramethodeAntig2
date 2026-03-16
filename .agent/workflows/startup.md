@@ -31,3 +31,7 @@ After reading, you know:
 
 ## Step 3 — Proceed with user request
 You are now ready to help without needing to re-explore the project from scratch each time.
+
+
+
+ 

@@ -14,7 +14,10 @@ import {
     Activity,
     Package,
     Scissors,
-    Users
+    Users,
+    Layers,
+    Factory,
+    PackageCheck
 } from 'lucide-react';
 import ModelWorkflow from './components/ModelWorkflow';
 import Library from './components/Library';
@@ -26,12 +29,14 @@ import Planning from './components/Planning';
 import SuiviProduction from './components/SuiviProduction';
 import Dashboard from './components/Dashboard';
 import Magasin from './components/Magasin';
+import Atelier from './components/Atelier';
 import AdminDashboard from './src/components/AdminDashboard';
 import { useAuth } from './src/context/AuthContext';
 import Login from './src/components/Login';
 import Signup from './src/components/Signup';
 import { Machine, Operation, FicheData, Poste, SpeedFactor, ComplexityFactor, StandardTime, Guide, ModelData, AppSettings } from './types';
 import Configuration from './components/Configuration';
+import StockExport from './components/StockExport';
 
 const DEFAULT_SETTINGS: AppSettings = {
     costMinute: 0.85,
@@ -109,6 +114,7 @@ type HistoryState = {
 // ── Language Translations ────────────────────────────────────────────────────
 const TRANSLATIONS = {
     fr: {
+        ingenierie: 'Ingénierie',
         atelier: 'Atelier',
         bibliotheque: 'Bibliothèque',
         configuration: 'Configuration',
@@ -133,6 +139,7 @@ const TRANSLATIONS = {
         refresh: 'Actualiser la vue',
     },
     ar: {
+        ingenierie: 'الهندسة',
         atelier: 'الورشة',
         bibliotheque: 'المكتبة',
         configuration: 'الإعدادات',
@@ -167,9 +174,8 @@ export default function App() {
     const t = TRANSLATIONS[lang];
 
     // --- STATE: NAVIGATION ---
-    const [currentView, setCurrentView] = useState<'dashboard' | 'atelier' | 'library' | 'coupe' | 'effectifs' | 'planning' | 'suivi' | 'magasin' | 'config' | 'profil' | 'admin'>('dashboard');
+    const [currentView, setCurrentView] = useState<'dashboard' | 'ingenierie' | 'atelier' | 'library' | 'coupe' | 'effectifs' | 'planning' | 'suivi' | 'magasin' | 'export' | 'config' | 'parametres' | 'profil' | 'admin'>('dashboard');
     const [navigationContext, setNavigationContext] = useState<'coupe' | 'planning' | null>(null); // NEW: Track where to return to
-    // --- STATE: PLANNING & SUIVI ---
     const [planningEvents, setPlanningEvents] = useState<import('./types').PlanningEvent[]>(() => {
         try {
             const saved = localStorage.getItem('beramethode_planning');
@@ -184,11 +190,35 @@ export default function App() {
         } catch { return []; }
     });
 
+    // --- STATE: MAGASIN & ATELIER ---
+    const [demandesAppro, setDemandesAppro] = useState<import('./types').DemandeAppro[]>(() => {
+        try {
+            const saved = localStorage.getItem('beramethode_demandesAppro');
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
+
     // Save planning and suivis to localstorage
     useEffect(() => {
         localStorage.setItem('beramethode_planning', JSON.stringify(planningEvents));
         localStorage.setItem('beramethode_suivis', JSON.stringify(suivis));
-    }, [planningEvents, suivis]);
+        localStorage.setItem('beramethode_demandesAppro', JSON.stringify(demandesAppro));
+    }, [planningEvents, suivis, demandesAppro]);
+
+    const handleAddDemandeAppro = (d: Partial<import('./types').DemandeAppro>) => {
+        const newDemande: import('./types').DemandeAppro = {
+            id: `DA-${Date.now()}`,
+            dateDemande: new Date().toISOString(),
+            modelId: d.modelId || '',
+            chaineId: d.chaineId || '',
+            produitDesignation: d.produitDesignation || '',
+            quantiteDemandee: d.quantiteDemandee || 0,
+            demandeur: d.demandeur || 'Atelier',
+            notes: d.notes,
+            statut: 'attente'
+        };
+        setDemandesAppro(prev => [newDemande, ...prev]);
+    };
 
     // --- STATE: LAYOUT MEMORY (Lifted Up) ---
     const [layoutMemory, setLayoutMemory] = useState<Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>>({});
@@ -491,7 +521,18 @@ export default function App() {
         }
     }, [models, user]);
 
-    // --- ACTIONS ---
+    // --- EXPORT EVENT LISTENER ---
+    useEffect(() => {
+        const handleExportModel = (e: any) => {
+            const { modelId } = e.detail;
+            setModels(prev => prev.map(m => m.id === modelId ? { ...m, workflowStatus: 'EXPORT' } : m));
+            setPlanningEvents(prev => prev.map(evt => evt.modelId === modelId ? { ...evt, status: 'DONE' } : evt));
+        };
+        window.addEventListener('export-model', handleExportModel);
+        return () => window.removeEventListener('export-model', handleExportModel);
+    }, []);
+
+    // --- RENDERING CONDITIONS ---
     if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
 
     if (!user && !isGuest) {
@@ -757,7 +798,7 @@ export default function App() {
                         </span>
 
                         {/* AUTO-SAVE INDICATOR */}
-                        {currentView === 'atelier' && (
+                        {currentView === 'ingenierie' && (
                             <div className="ml-4 flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-full border border-slate-100">
                                 {saveStatus === 'saved' ? (
                                     <>
@@ -792,13 +833,23 @@ export default function App() {
                             Tableau de bord
                         </button>
                         <button
-                            onClick={() => setCurrentView('atelier')}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'atelier'
+                            onClick={() => setCurrentView('ingenierie')}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'ingenierie'
                                 ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
                                 : 'bg-transparent border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
                                 }`}
                         >
                             <LayoutDashboard className="w-3.5 h-3.5" />
+                            {t.ingenierie}
+                        </button>
+                        <button
+                            onClick={() => setCurrentView('atelier')}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'atelier'
+                                ? 'bg-orange-50 border-orange-100 text-orange-700'
+                                : 'bg-transparent border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                                }`}
+                        >
+                            <Factory className="w-3.5 h-3.5" />
                             {t.atelier}
                         </button>
                         <button
@@ -862,6 +913,16 @@ export default function App() {
                             Magasin
                         </button>
                         <button
+                            onClick={() => setCurrentView('export')}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'export'
+                                ? 'bg-cyan-50 border-cyan-100 text-cyan-700'
+                                : 'bg-transparent border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                                }`}
+                        >
+                            <PackageCheck className="w-3.5 h-3.5" />
+                            Stock Fini
+                        </button>
+                        <button
                             onClick={() => setCurrentView('config')}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'config'
                                 ? 'bg-amber-50 border-amber-100 text-amber-700'
@@ -870,6 +931,16 @@ export default function App() {
                         >
                             <SettingsIcon className="w-3.5 h-3.5" />
                             {t.configuration}
+                        </button>
+                        <button
+                            onClick={() => setCurrentView('parametres')}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'parametres'
+                                ? 'bg-violet-50 border-violet-100 text-violet-700'
+                                : 'bg-transparent border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                                }`}
+                        >
+                            <Layers className="w-3.5 h-3.5" />
+                            Paramètres
                         </button>
 
                         {user?.role === 'admin' && (
@@ -946,7 +1017,7 @@ export default function App() {
                     />
                 )}
 
-                {currentView === 'atelier' && (
+                {currentView === 'ingenierie' && (
                     <ModelWorkflow
                         machines={machines}
                         operations={operations}
@@ -1003,6 +1074,19 @@ export default function App() {
                     />
                 )}
 
+                {currentView === 'atelier' && (
+                    <Atelier
+                        models={models}
+                        planningEvents={planningEvents}
+                        suivis={suivis}
+                        settings={globalSettings}
+                        handleAddDemandeAppro={handleAddDemandeAppro}
+                        setPlanningEvents={setPlanningEvents}
+                        setModels={setModels}
+                        setSuivis={setSuivis}
+                    />
+                )}
+
                 {currentView === 'library' && (
                     <Library
                         models={models}
@@ -1048,19 +1132,37 @@ export default function App() {
                         models={models}
                         suivis={suivis}
                         setSuivis={setSuivis}
+                        planningEvents={planningEvents}
                         settings={globalSettings}
                     />
                 )}
 
                 {currentView === 'magasin' && (
-                    <Magasin />
+                    <Magasin
+                        models={models}
+                        planningEvents={planningEvents}
+                        demandes={demandesAppro}
+                        setDemandes={setDemandesAppro}
+                    />
+                )}
+
+                {currentView === 'export' && (
+                    <StockExport
+                        models={models}
+                        suivis={suivis}
+                        planningEvents={planningEvents}
+                    />
                 )}
 
                 {currentView === 'config' && (
                     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#fafafa]">
                         <Configuration settings={globalSettings} setSettings={setGlobalSettings} lang={lang} />
-                        <div className="px-8 max-w-5xl mx-auto -mt-6 pb-24 border-t border-slate-200/60 pt-8 mt-4 relative">
-                            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-100 text-slate-400 px-3 py-1 text-[10px] font-bold uppercase rounded-full border border-slate-200">Base de données Techniques</div>
+                    </div>
+                )}
+
+                {currentView === 'parametres' && (
+                    <div className="flex-1 overflow-y-auto no-scrollbar bg-[#fafafa]">
+                        <div className="px-8 max-w-6xl mx-auto pb-24 pt-6">
                             <Machin
                                 machines={machines}
                                 onSave={handleSaveMachine}

@@ -124,6 +124,7 @@ export type FicheData = {
   sizes?: string[];
   colors?: { id: string, name: string }[];
   gridQuantities?: Record<string, number>;
+  materials?: PurchasingData[];
 };
 
 // --- NEW TYPES FOR COST CALCULATOR ---
@@ -175,6 +176,7 @@ export interface AppSettings {
   workingDays: number[]; // e.g [1,2,3,4,5] (Monday to Friday, 1=Monday)
   currency: string; // 'MAD' | 'EUR' | 'USD'
   chainsCount: number; // e.g 12
+  chainNames?: Record<string, string>; // NEW: custom chain names matching "CHAINE 1" => "My Custom Chain"
   organigram: { id: string, name: string, role: string, parentId?: string }[]; // General Managers
   chainStaff: Record<string, { id: string, name: string, role: string }[]>; // Staff/Supervisors per chain
   calendarExceptions?: Record<string, { isWorking: boolean, note: string }>; // Key: 'YYYY-MM-DD', for specific holidays or extra working days
@@ -227,15 +229,16 @@ export interface ModelData {
   ficheData?: FicheData; // NEW: Store complete FicheData for matrix sync
   meta_data: {
     nom_modele: string;
-    reference?: string; // Added Reference
-    category?: string; // Added Category for search and display
+    reference?: string;
+    category?: string;
     date_creation: string;
-    date_lancement?: string; // Added Launch Date
-    total_temps: number; // in minutes
+    date_lancement?: string;
+    total_temps: number;
     effectif: number;
-    sizes?: string[]; // Synchronized from FicheTechnique
-    colors?: { id: string, name: string }[]; // Synchronized from FicheTechnique
-    quantity?: number; // Total pieces
+    sizes?: string[];
+    colors?: { id: string, name: string }[];
+    quantity?: number;
+    photo_url?: string; // Phase 5 Anticipation
   };
   gamme_operatoire: Operation[];
   // Added for Implantation persistence
@@ -270,24 +273,13 @@ export type PlanningEvent = {
   chaineId: string;
   dateLancement: string;
   dateExport: string;
+  dateFin?: string; // Phase 6 Atelier
   qteTotal: number;
   superviseur: string;
   status?: 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK' | 'DONE';
 };
 
-export type HourlySuivi = {
-  h0830?: number;
-  h0930?: number;
-  h1030?: number;
-  h1130?: number;
-  h1230?: number;
-  h1430?: number;
-  h1530?: number;
-  h1630?: number;
-  h1730?: number;
-  h1830?: number;
-  h1930?: number;
-};
+export type HourlySuivi = Record<string, number | undefined>;
 
 export type SuiviData = {
   id: string;
@@ -305,8 +297,41 @@ export type SuiviData = {
   preparation: number;
   finition: number;
   controle: number;
+  absent?: number; // Added optional absent tracking
   totalWorkers: number;
   downtimes?: Record<string, string>; // NEW: Phase 13 - Reasons for missed targets
   defauts?: { id: string; hour: string; type: string; quantity: number; notes: string }[]; // NEW: Phase 13 - In-Line QC
   trs?: number; // NEW: Phase 13 - OEE/TRS score
 };
+
+// --- TYPES FOR MAGASIN & ATELIER ---
+
+export interface MouvementStock {
+  id: string;
+  productId: string;
+  type: 'entree' | 'sortie' | 'retour_atelier' | 'rebut' | 'regularisation';
+  source: 'fournisseur' | 'retour_chaine' | 'inventaire';
+  destination: 'chaine' | 'rebut' | 'inventaire';
+  quantite: number;
+  prixUnitaire?: number;
+  fournisseurId?: string;
+  chaineId?: string;
+  modeleRef?: string;
+  date: string;
+  operateurNom?: string;
+  notes?: string;
+  lotId?: string;
+  bain?: string;
+}
+
+export interface DemandeAppro {
+  id: string;
+  dateDemande: string;
+  modelId: string;
+  chaineId: string;
+  produitDesignation: string;
+  quantiteDemandee: number;
+  demandeur: string;
+  notes?: string;
+  statut: 'attente' | 'preparee' | 'livree' | 'rejetee';
+}

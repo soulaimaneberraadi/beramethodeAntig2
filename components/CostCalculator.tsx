@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Banknote, Receipt, LayoutTemplate, FileSpreadsheet, FileDown, Printer, Clock, FileText, PieChart as PieChartIcon, SlidersHorizontal, ClipboardList } from 'lucide-react';
-import { Material, AppSettings, PdfSettings, FicheData } from '../types';
+import { Material, AppSettings, PdfSettings, FicheData, PurchasingData } from '../types';
 import { translations, fmt } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
@@ -149,7 +149,12 @@ export default function CostCalculator({
     };
 
     // --- State: Materials ---
-    const [materials, setMaterials] = useState<Material[]>([]);
+    const [materials, setMaterials] = useState<Material[]>(ficheData.materials || []);
+
+    // Sync local materials to FicheData on change
+    useEffect(() => {
+        setFicheData(prev => ({ ...prev, materials: materials as PurchasingData[] }));
+    }, [materials, setFicheData]);
 
     // --- Calculations ---
     const totalMaterials = materials.reduce((acc, item) => acc + (item.unitPrice * item.qty), 0);

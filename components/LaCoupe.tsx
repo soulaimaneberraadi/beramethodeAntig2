@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ModelData, OrdreCoupe, Faisceau } from '../types';
-import { Scissors, FileText, CheckCircle2, Clock, Search, Layers, ChevronRight, AlertCircle, Maximize, Printer, PackageSearch, Plus, Trash2, Barcode, FolderOpen, Send, CheckCircle, XCircle, Truck, PlayCircle, Save, Palette } from 'lucide-react';
+import { Scissors, FileText, CheckCircle2, Clock, Search, Layers, ChevronRight, AlertCircle, Maximize, Printer, PackageSearch, Plus, Trash2, Barcode, FolderOpen, Send, CheckCircle, XCircle, Truck, PlayCircle, Save, Palette, Grid3X3 } from 'lucide-react';
+import ExcelInput from './ExcelInput';
+import { TEXTILE_COLORS } from '../data/textileData';
+import { PurchasingData } from '../types';
 
 const BADGE_COLORS = [
     { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-500' },
@@ -22,7 +26,21 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedModel, setSelectedModel] = useState<ModelData | null>(null);
 
-    // Default Ordre de Coupe State
+    // Matrix input states
+    const [newSizeInput, setNewSizeInput] = useState('');
+    const [newColorInput, setNewColorInput] = useState('');
+    const [pickedHexColor, setPickedHexColor] = useState('#10b981');
+
+    // Context Menu state for matrix items
+    const [matrixCtx, setMatrixCtx] = useState<{ x: number; y: number; type: 'size' | 'color'; index: number; id?: string; name?: string } | null>(null);
+    const [editingMatrixItem, setEditingMatrixItem] = useState<{ type: 'size' | 'color'; index: number; value: string } | null>(null);
+
+    // Close matrix context menu on click anywhere
+    useEffect(() => {
+        const close = () => setMatrixCtx(null);
+        window.addEventListener('click', close);
+        return () => window.removeEventListener('click', close);
+    }, []);
     const [ordre, setOrdre] = useState<OrdreCoupe>({
         refModele: '',
         longueurMatelas: 0,
@@ -118,6 +136,37 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
             finalWorkflow = 'PLANNING';
         } else if (transferTo === 'SUIVI') {
             finalWorkflow = 'SUIVI';
+        }
+
+        // ── STOCK DEDUCTION: When sending to PLANNING, deduct theoretical materials from Magasin ──
+        if (transferTo === 'PLANNING' && requiredMaterials.length > 0) {
+            try {
+                const magStr = localStorage.getItem('beramethode_magasin');
+                let magItems = magStr ? JSON.parse(magStr) : [];
+                requiredMaterials.forEach((mat: any) => {
+                    const existingIdx = magItems.findIndex((i: any) =>
+                        i.nom === mat.name || i.designation === mat.name
+                    );
+                    if (existingIdx >= 0) {
+                        magItems[existingIdx].stockActuel = Math.max(0,
+                            (magItems[existingIdx].stockActuel || 0) - mat.neededForProduction
+                        );
+                        // Log mouvement
+                        if (!magItems[existingIdx].mouvements) magItems[existingIdx].mouvements = [];
+                        magItems[existingIdx].mouvements.push({
+                            id: `MVT-${Date.now()}`,
+                            date: new Date().toISOString(),
+                            type: 'sortie_production',
+                            quantite: -mat.neededForProduction,
+                            reference: `Coupe → Planning : ${ordre.refModele}`,
+                            responsable: 'La Coupe'
+                        });
+                    }
+                });
+                localStorage.setItem('beramethode_magasin', JSON.stringify(magItems));
+            } catch (e) {
+                console.error("Failed to deduct Magasin stock", e);
+            }
         }
 
         setModels(prev => prev.map(m => {
@@ -226,51 +275,209 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
     const colorInputRef = React.useRef<HTMLInputElement>(null);
 
     const handleAddSize = () => {
-        if (!selectedModel) return;
-        const newSize = prompt("Entrez la nouvelle taille (ex: 3XL, 42, etc.) :");
-        if (newSize && newSize.trim() !== '') {
-            const currentFiche = selectedModel.ficheData || {
-                reference: '', article: '', category: '',
-                sizes: selectedModel.meta_data.sizes || [],
-                colors: selectedModel.meta_data.colors || [],
-                quantity: selectedModel.meta_data.quantity || 0,
-                date: selectedModel.meta_data.date_lancement || '',
-                client: '', status: '', imageFront: null, imageBack: null,
-                gridQuantities: {}, designation: '', color: '', chaine: '', targetEfficiency: 85,
-                unitCost: 0, clientPrice: 0, observations: '', costMinute: 0.85
-            };
-            const updatedSizes = [...currentFiche.sizes, newSize.trim().toUpperCase()];
-            const updatedFiche = { ...currentFiche, sizes: updatedSizes };
+        if (!selectedModel || !newSizeInput.trim()) return;
 
-            setModels(prev => prev.map(m => m.id === selectedModel.id ? { ...m, ficheData: updatedFiche } : m));
-            setSelectedModel({ ...selectedModel, ficheData: updatedFiche });
-            if (currentModelId === selectedModel.id && setFicheData) setFicheData(updatedFiche);
-        }
+        const currentFiche = selectedModel.ficheData || {
+            reference: '', article: '', category: '',
+            sizes: selectedModel.meta_data.sizes || [],
+            colors: selectedModel.meta_data.colors || [],
+            quantity: selectedModel.meta_data.quantity || 0,
+            date: selectedModel.meta_data.date_lancement || '',
+            client: '', status: '', imageFront: null, imageBack: null,
+            gridQuantities: {}, designation: '', color: '', chaine: '', targetEfficiency: 85,
+            unitCost: 0, clientPrice: 0, observations: '', costMinute: 0.85
+        };
+
+        // Allow adding multiple sizes separated by space or comma
+        const newSizesList = newSizeInput.split(/[\s,]+/).filter(s => s.trim() !== '');
+        if (newSizesList.length === 0) return;
+
+        const updatedSizes = [...currentFiche.sizes, ...newSizesList.map(s => s.toUpperCase())];
+        const updatedFiche = { ...currentFiche, sizes: updatedSizes };
+
+        setModels(prev => prev.map(m => m.id === selectedModel.id ? { ...m, ficheData: updatedFiche } : m));
+        setSelectedModel({ ...selectedModel, ficheData: updatedFiche });
+        if (currentModelId === selectedModel.id && setFicheData) setFicheData(updatedFiche);
+
+        setNewSizeInput('');
     };
 
-    const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!selectedModel) return;
-        const hex = e.target.value;
-        const colorName = prompt(`Couleur sélectionnée. Entrez son nom (ex: Rouge, Noir) :`, "Nouvelle Couleur");
-        if (colorName && colorName.trim() !== '') {
-            const currentFiche = selectedModel.ficheData || {
-                reference: '', article: '', category: '',
-                sizes: selectedModel.meta_data.sizes || [],
-                colors: selectedModel.meta_data.colors || [],
-                quantity: selectedModel.meta_data.quantity || 0,
-                date: selectedModel.meta_data.date_lancement || '',
-                client: '', status: '', imageFront: null, imageBack: null,
-                gridQuantities: {}, designation: '', color: '', chaine: '', targetEfficiency: 85,
-                unitCost: 0, clientPrice: 0, observations: '', costMinute: 0.85
-            };
-            const newColor = { id: hex, name: colorName.trim() };
-            const updatedColors = [...currentFiche.colors, newColor];
-            const updatedFiche = { ...currentFiche, colors: updatedColors };
+    const handleAddColorText = () => {
+        if (!selectedModel || !newColorInput.trim()) return;
+        const currentFiche = selectedModel.ficheData || {
+            reference: '', article: '', category: '',
+            sizes: selectedModel.meta_data.sizes || [],
+            colors: selectedModel.meta_data.colors || [],
+            quantity: selectedModel.meta_data.quantity || 0,
+            date: selectedModel.meta_data.date_lancement || '',
+            client: '', status: '', imageFront: null, imageBack: null,
+            gridQuantities: {}, designation: '', color: '', chaine: '', targetEfficiency: 85,
+            unitCost: 0, clientPrice: 0, observations: '', costMinute: 0.85
+        };
+        const newColor = { id: Date.now().toString(), name: newColorInput.trim() };
+        const updatedColors = [...currentFiche.colors, newColor];
+        const updatedFiche = { ...currentFiche, colors: updatedColors };
 
-            setModels(prev => prev.map(m => m.id === selectedModel.id ? { ...m, ficheData: updatedFiche } : m));
-            setSelectedModel({ ...selectedModel, ficheData: updatedFiche });
-            if (currentModelId === selectedModel.id && setFicheData) setFicheData(updatedFiche);
+        setModels(prev => prev.map(m => m.id === selectedModel.id ? { ...m, ficheData: updatedFiche } : m));
+        setSelectedModel({ ...selectedModel, ficheData: updatedFiche });
+        if (currentModelId === selectedModel.id && setFicheData) setFicheData(updatedFiche);
+
+        setNewColorInput('');
+    };
+
+    // Smart color name detection from hex
+    const hexToColorName = (hex: string): string => {
+        const h = hex.replace('#', '');
+        const r = parseInt(h.substring(0, 2), 16);
+        const g = parseInt(h.substring(2, 4), 16);
+        const b = parseInt(h.substring(4, 6), 16);
+
+        // Named colors with their RGB values
+        const namedColors: { name: string; r: number; g: number; b: number }[] = [
+            { name: 'Noir', r: 0, g: 0, b: 0 },
+            { name: 'Blanc', r: 255, g: 255, b: 255 },
+            { name: 'Rouge', r: 255, g: 0, b: 0 },
+            { name: 'Rouge Foncé', r: 139, g: 0, b: 0 },
+            { name: 'Bordeaux', r: 128, g: 0, b: 32 },
+            { name: 'Cramoisi', r: 220, g: 20, b: 60 },
+            { name: 'Rose', r: 255, g: 105, b: 180 },
+            { name: 'Rose Clair', r: 255, g: 182, b: 193 },
+            { name: 'Fuchsia', r: 255, g: 0, b: 255 },
+            { name: 'Orange', r: 255, g: 165, b: 0 },
+            { name: 'Orange Foncé', r: 255, g: 140, b: 0 },
+            { name: 'Corail', r: 255, g: 127, b: 80 },
+            { name: 'Saumon', r: 250, g: 128, b: 114 },
+            { name: 'Jaune', r: 255, g: 255, b: 0 },
+            { name: 'Jaune Doré', r: 255, g: 215, b: 0 },
+            { name: 'Jaune Pâle', r: 255, g: 255, b: 224 },
+            { name: 'Vert', r: 0, g: 128, b: 0 },
+            { name: 'Vert Clair', r: 144, g: 238, b: 144 },
+            { name: 'Vert Foncé', r: 0, g: 100, b: 0 },
+            { name: 'Vert Émeraude', r: 16, g: 185, b: 129 },
+            { name: 'Lime', r: 0, g: 255, b: 0 },
+            { name: 'Olive', r: 128, g: 128, b: 0 },
+            { name: 'Kaki', r: 189, g: 183, b: 107 },
+            { name: 'Turquoise', r: 64, g: 224, b: 208 },
+            { name: 'Cyan', r: 0, g: 255, b: 255 },
+            { name: 'Bleu Ciel', r: 135, g: 206, b: 235 },
+            { name: 'Bleu', r: 0, g: 0, b: 255 },
+            { name: 'Bleu Royal', r: 65, g: 105, b: 225 },
+            { name: 'Bleu Marine', r: 0, g: 0, b: 128 },
+            { name: 'Indigo', r: 75, g: 0, b: 130 },
+            { name: 'Violet', r: 128, g: 0, b: 128 },
+            { name: 'Lavande', r: 230, g: 230, b: 250 },
+            { name: 'Mauve', r: 224, g: 176, b: 255 },
+            { name: 'Marron', r: 139, g: 69, b: 19 },
+            { name: 'Chocolat', r: 210, g: 105, b: 30 },
+            { name: 'Beige', r: 245, g: 245, b: 220 },
+            { name: 'Crème', r: 255, g: 253, b: 208 },
+            { name: 'Ivoire', r: 255, g: 255, b: 240 },
+            { name: 'Gris', r: 128, g: 128, b: 128 },
+            { name: 'Gris Clair', r: 192, g: 192, b: 192 },
+            { name: 'Gris Foncé', r: 64, g: 64, b: 64 },
+            { name: 'Argent', r: 192, g: 192, b: 192 },
+        ];
+
+        let closest = namedColors[0];
+        let minDist = Infinity;
+        for (const c of namedColors) {
+            const dist = Math.sqrt((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2);
+            if (dist < minDist) { minDist = dist; closest = c; }
         }
+        return closest.name;
+    };
+
+    const handleAddVisualColor = (hex: string) => {
+        if (!selectedModel) return;
+        const currentFiche = selectedModel.ficheData || {
+            reference: '', article: '', category: '',
+            sizes: selectedModel.meta_data.sizes || [],
+            colors: selectedModel.meta_data.colors || [],
+            quantity: selectedModel.meta_data.quantity || 0,
+            date: selectedModel.meta_data.date_lancement || '',
+            client: '', status: '', imageFront: null, imageBack: null,
+            gridQuantities: {}, designation: '', color: '', chaine: '', targetEfficiency: 85,
+            unitCost: 0, clientPrice: 0, observations: '', costMinute: 0.85
+        };
+        const detectedName = hexToColorName(hex);
+        const newColor = { id: hex, name: detectedName };
+        const updatedColors = [...currentFiche.colors, newColor];
+        const updatedFiche = { ...currentFiche, colors: updatedColors };
+
+        setModels(prev => prev.map(m => m.id === selectedModel.id ? { ...m, ficheData: updatedFiche } : m));
+        setSelectedModel({ ...selectedModel, ficheData: updatedFiche });
+        if (currentModelId === selectedModel.id && setFicheData) setFicheData(updatedFiche);
+    };
+
+    // --- CONTEXT MENU HANDLERS FOR MATRIX ---
+    const buildFiche = () => selectedModel?.ficheData || {
+        reference: '', article: '', category: '',
+        sizes: selectedModel?.meta_data?.sizes || [],
+        colors: selectedModel?.meta_data?.colors || [],
+        quantity: selectedModel?.meta_data?.quantity || 0,
+        date: selectedModel?.meta_data?.date_lancement || '',
+        client: '', status: '', imageFront: null, imageBack: null,
+        gridQuantities: {}, designation: '', color: '', chaine: '', targetEfficiency: 85,
+        unitCost: 0, clientPrice: 0, observations: '', costMinute: 0.85
+    };
+
+    const applyFicheUpdate = (updatedFiche: any) => {
+        if (!selectedModel) return;
+        setModels(prev => prev.map(m => m.id === selectedModel.id ? { ...m, ficheData: updatedFiche } : m));
+        setSelectedModel({ ...selectedModel, ficheData: updatedFiche });
+        if (currentModelId === selectedModel.id && setFicheData) setFicheData(updatedFiche);
+    };
+
+    const removeSize = (sizeIndex: number) => {
+        if (!selectedModel) return;
+        const fiche = buildFiche();
+        const updatedSizes = fiche.sizes.filter((_: any, i: number) => i !== sizeIndex);
+        // Remap gridQuantities: remove deleted index, shift higher indices down
+        const newGrid: Record<string, number> = {};
+        Object.entries(fiche.gridQuantities || {}).forEach(([key, val]) => {
+            const [cId, sIdxStr] = key.split('_');
+            const sIdx = parseInt(sIdxStr);
+            if (sIdx === sizeIndex) return; // skip deleted
+            const newIdx = sIdx > sizeIndex ? sIdx - 1 : sIdx;
+            newGrid[`${cId}_${newIdx}`] = val as number;
+        });
+        applyFicheUpdate({ ...fiche, sizes: updatedSizes, gridQuantities: newGrid });
+    };
+
+    const removeColor = (colorId: string) => {
+        if (!selectedModel) return;
+        const fiche = buildFiche();
+        const updatedColors = fiche.colors.filter((c: any) => {
+            const id = c.id || (typeof c === 'string' ? c : c.name);
+            return id !== colorId;
+        });
+        // Clean up gridQuantities for this color
+        const newGrid: Record<string, number> = {};
+        Object.entries(fiche.gridQuantities || {}).forEach(([key, val]) => {
+            if (!key.startsWith(`${colorId}_`)) newGrid[key] = val as number;
+        });
+        applyFicheUpdate({ ...fiche, colors: updatedColors, gridQuantities: newGrid });
+    };
+
+    const editSize = (sizeIndex: number, newValue: string) => {
+        if (!selectedModel || !newValue.trim()) return;
+        const fiche = buildFiche();
+        const updatedSizes = [...fiche.sizes];
+        updatedSizes[sizeIndex] = newValue.trim().toUpperCase();
+        applyFicheUpdate({ ...fiche, sizes: updatedSizes });
+        setEditingMatrixItem(null);
+    };
+
+    const editColor = (colorId: string, newName: string) => {
+        if (!selectedModel || !newName.trim()) return;
+        const fiche = buildFiche();
+        const updatedColors = fiche.colors.map((c: any) => {
+            const id = c.id || (typeof c === 'string' ? c : c.name);
+            if (id === colorId) return { ...c, name: newName.trim() };
+            return c;
+        });
+        applyFicheUpdate({ ...fiche, colors: updatedColors });
+        setEditingMatrixItem(null);
     };
 
     const handleGenerateBarcodes = () => {
@@ -281,6 +488,44 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
     const consoTheorique = (ordre.longueurMatelas || 0) * (ordre.nbrFeuilles || 0) * (ordre.nbrMatelas || 0);
     const consoReelle = (ordre.consommation || 0) * (ordre.qteTotale || 0);
     const waste = consoTheorique > 0 ? ((consoTheorique - consoReelle) / consoTheorique * 100).toFixed(1) : 0;
+
+    // --- MATERIAL SIMULATION (vs Magasin) ---
+    const [magasinItems, setMagasinItems] = useState<any[]>([]);
+    useEffect(() => {
+        try {
+            const magStr = localStorage.getItem('beramethode_magasin');
+            if (magStr) setMagasinItems(JSON.parse(magStr));
+        } catch (e) {
+            console.error("Failed to load magasin items", e);
+        }
+    }, [selectedModel]);
+
+    const requiredMaterials = React.useMemo(() => {
+        if (!selectedModel || !selectedModel.ficheData || !selectedModel.ficheData.materials) return [];
+        // Extract required materials for this order quantity
+        return selectedModel.ficheData.materials.map((m: PurchasingData) => {
+            const targetQty = matrixStats.grandTotal > 0 ? matrixStats.grandTotal : (selectedModel.meta_data.quantity || 1);
+            // Calculate total needed equivalent to CostCalculator logic (with waste)
+            const qtyPerItem = m.qty;
+            const totalRaw = qtyPerItem * targetQty;
+            const wasteRate = 5; // Default from calculator if not saved
+            const totalWithWaste = totalRaw * (1 + wasteRate / 100);
+            const neededForProduction = (m.unit === 'bobine' || m.unit === 'pc') ? Math.ceil(totalWithWaste) : parseFloat(totalWithWaste.toFixed(2));
+
+            // Find in Magasin
+            const inMagasin = magasinItems.find((mag: any) => mag.nom === m.name || mag.designation === m.name);
+            const stockActuel = inMagasin ? (inMagasin.stockActuel || 0) : 0;
+            const isSufficient = stockActuel >= neededForProduction;
+
+            return {
+                ...m,
+                neededForProduction,
+                stockActuel,
+                isSufficient
+            };
+        });
+    }, [selectedModel, matrixStats.grandTotal, magasinItems]);
+
 
     // Status config mapping for visual styles
     const STATUS_MAP = {
@@ -591,47 +836,87 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
 
                             {/* MATRIX CARD - SYNCED WITH FICHE TECHNIQUE */}
                             <div className="bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden mb-6">
-                                <div className="p-8 sm:p-10 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <div className="p-8 sm:p-10 border-b border-slate-100 flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6">
                                     <div className="flex items-center gap-4">
                                         <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center">
                                             <Palette className="w-6 h-6 text-emerald-600" />
                                         </div>
                                         <div>
-                                            <h3 className="font-black text-slate-800 text-2xl tracking-tight">Matrice des Tailles / Couleurs</h3>
+                                            <h3 className="font-black text-slate-800 text-2xl tracking-tight">Répartition (Tailles / Couleurs)</h3>
                                             <p className="text-slate-500 font-medium mt-1">Générez et visualisez vos faisceaux à partir de cette grille synchronisée.</p>
                                         </div>
                                     </div>
 
-                                    <div className="flex gap-3 items-center">
-                                        <input
-                                            type="color"
-                                            ref={colorInputRef}
-                                            onChange={handleColorChange}
-                                            className="sr-only" // hidden 
-                                        />
-                                        <button
-                                            onClick={() => colorInputRef.current?.click()}
-                                            className="px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-xl hover:bg-emerald-100 transition-colors flex items-center gap-2"
-                                        >
-                                            <Plus className="w-4 h-4" />
-                                            Coloris
-                                        </button>
-                                        <button
-                                            onClick={handleAddSize}
-                                            className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 font-bold rounded-xl hover:bg-blue-100 transition-colors flex items-center gap-2"
-                                        >
-                                            <Plus className="w-4 h-4" />
-                                            Taille
-                                        </button>
+                                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center w-full xl:w-auto">
+                                        {/* ADD SIZE INPUT */}
+                                        <div className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
+                                            <input
+                                                type="text"
+                                                placeholder="Ajouter Tailles (ex: 36 38 40)"
+                                                className="bg-transparent text-sm font-medium px-3 outline-none w-56 text-slate-700 placeholder:text-slate-400 py-1.5"
+                                                value={newSizeInput}
+                                                onChange={(e) => setNewSizeInput(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleAddSize()}
+                                            />
+                                            <button onClick={handleAddSize} className="bg-white rounded p-1.5 shadow-sm hover:text-indigo-600 transition-colors">
+                                                <Plus className="w-4 h-4" />
+                                            </button>
+                                        </div>
+
                                         <button
                                             onClick={handleGenerateBarcodes}
                                             disabled={matrixStats.grandTotal === 0}
-                                            className="px-5 py-2.5 bg-slate-900 border border-slate-800 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ml-2"
+                                            className="px-5 py-2.5 bg-slate-900 border border-slate-800 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <Barcode className="w-4 h-4" />
                                             Imprimer Tickets
                                         </button>
                                     </div>
+                                </div>
+
+                                <div className="bg-slate-50 p-2.5 border-b border-slate-200 flex flex-wrap gap-2 items-center">
+                                    {/* Color Swatch Picker */}
+                                    <label className="relative flex items-center justify-center cursor-pointer shrink-0" title="Choisir une couleur">
+                                        <input
+                                            type="color"
+                                            value={pickedHexColor}
+                                            onChange={(e) => setPickedHexColor(e.target.value)}
+                                            className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                                        />
+                                        <div className="w-7 h-7 rounded-lg border-2 border-slate-300 shadow-sm cursor-pointer hover:scale-110 transition-transform" style={{ backgroundColor: pickedHexColor }}></div>
+                                    </label>
+                                    {/* Auto-detected name badge */}
+                                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[11px] font-black rounded-md whitespace-nowrap">
+                                        {hexToColorName(pickedHexColor)}
+                                    </span>
+                                    {/* Text input */}
+                                    <div className="relative flex-1 min-w-[140px] flex items-center bg-white border border-slate-200 rounded-lg focus-within:border-indigo-400 px-3 h-8">
+                                        <Palette className="w-3 h-3 text-slate-400 mr-2 z-20 relative shrink-0" />
+                                        <ExcelInput
+                                            suggestions={TEXTILE_COLORS.map(c => c.value)}
+                                            placeholder="Nom couleur (ou laisser auto)..."
+                                            className="text-xs font-bold text-slate-700 outline-none w-full pl-6 pr-2"
+                                            containerClassName="absolute inset-0 flex items-center"
+                                            value={newColorInput}
+                                            onChange={(val) => setNewColorInput(val)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    if (newColorInput.trim()) handleAddColorText();
+                                                    else handleAddVisualColor(pickedHexColor);
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                    {/* Add button */}
+                                    <button
+                                        onClick={() => {
+                                            if (newColorInput.trim()) handleAddColorText();
+                                            else handleAddVisualColor(pickedHexColor);
+                                        }}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors z-20 h-8"
+                                    >
+                                        <Plus className="w-3 h-3" /> Ajouter
+                                    </button>
                                 </div>
 
                                 <div className="p-4 sm:p-8 overflow-x-auto bg-slate-50">
@@ -645,8 +930,25 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
                                                     </th>
                                                 )}
                                                 {sizes.map((s, i) => (
-                                                    <th key={i} className="py-4 px-3 text-center font-black border-l border-slate-200 text-emerald-700 min-w-[90px]">
-                                                        {s}
+                                                    <th
+                                                        key={i}
+                                                        className="py-4 px-3 text-center font-black border-l border-slate-200 text-emerald-700 min-w-[90px] cursor-pointer hover:bg-emerald-50 transition-colors relative group/size"
+                                                        onContextMenu={(e) => { e.preventDefault(); setMatrixCtx({ x: e.pageX, y: e.pageY, type: 'size', index: i, name: s }); }}
+                                                        title="Clic droit pour modifier ou supprimer"
+                                                    >
+                                                        {editingMatrixItem?.type === 'size' && editingMatrixItem.index === i ? (
+                                                            <input
+                                                                autoFocus
+                                                                type="text"
+                                                                className="w-full text-center bg-white border-2 border-indigo-400 rounded-lg px-1 py-0.5 text-sm font-bold outline-none"
+                                                                defaultValue={s}
+                                                                onBlur={(e) => editSize(i, e.target.value)}
+                                                                onKeyDown={(e) => { if (e.key === 'Enter') editSize(i, (e.target as HTMLInputElement).value); if (e.key === 'Escape') setEditingMatrixItem(null); }}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                        ) : (
+                                                            <>{s}</>
+                                                        )}
                                                     </th>
                                                 ))}
                                                 <th className="py-4 px-4 text-center font-black bg-slate-200 text-slate-800 w-24">Total</th>
@@ -668,14 +970,34 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
 
                                                 return (
                                                     <tr key={cId} className="hover:bg-emerald-50/20 group transition-colors">
-                                                        <td className="py-3 px-4 border-l border-slate-200 font-bold text-slate-800">
-                                                            <div className="flex items-center gap-2">
-                                                                <div
-                                                                    className={`w-3 h-3 rounded-full shadow-sm ${cHex ? '' : palette.dot}`}
-                                                                    style={cHex ? { backgroundColor: cHex } : undefined}
+                                                        <td
+                                                            className="py-3 px-4 border-l border-slate-200 font-bold text-slate-800 cursor-pointer hover:bg-slate-50 transition-colors"
+                                                            onContextMenu={(e) => { e.preventDefault(); setMatrixCtx({ x: e.pageX, y: e.pageY, type: 'color', index: cIdx, id: cId, name: cName }); }}
+                                                            title="Clic droit pour modifier ou supprimer"
+                                                        >
+                                                            {editingMatrixItem?.type === 'color' && editingMatrixItem.index === cIdx ? (
+                                                                <input
+                                                                    autoFocus
+                                                                    type="text"
+                                                                    className="w-full bg-white border-2 border-indigo-400 rounded-lg px-2 py-0.5 text-sm font-bold outline-none"
+                                                                    defaultValue={cName}
+                                                                    onBlur={(e) => editColor(cId, e.target.value)}
+                                                                    onKeyDown={(e) => { if (e.key === 'Enter') editColor(cId, (e.target as HTMLInputElement).value); if (e.key === 'Escape') setEditingMatrixItem(null); }}
+                                                                    onClick={(e) => e.stopPropagation()}
                                                                 />
-                                                                <span className="truncate max-w-[120px]">{cName}</span>
-                                                            </div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-2">
+                                                                    <div
+                                                                        className={`w-3 h-3 rounded-full shadow-sm ${cHex ? '' : palette.dot}`}
+                                                                        style={cHex ? { backgroundColor: cHex } : undefined}
+                                                                    />
+                                                                    <span className="truncate max-w-[120px]">
+                                                                        {cHex && (cName.includes('personnalisé') || cName.startsWith('#') || cName.includes('rgb(') || cName.includes('Couleur P'))
+                                                                            ? hexToColorName(cHex)
+                                                                            : cName}
+                                                                    </span>
+                                                                </div>
+                                                            )}
                                                         </td>
                                                         {sizes.length === 0 && (
                                                             <td className="py-3 px-4 border-l border-slate-100 bg-slate-50/50 text-center text-slate-400 text-xl font-light">-</td>
@@ -725,6 +1047,114 @@ export default function LaCoupe({ models, setModels, onOpenInAtelier, currentMod
                                             </tr>
                                         </tfoot>
                                     </table>
+                                </div>
+
+                                {/* MATRIX CONTEXT MENU PORTAL */}
+                                {matrixCtx && createPortal(
+                                    <div
+                                        className="fixed bg-white rounded-xl shadow-2xl border border-slate-200 w-52 z-[9999] py-2 text-[13px] text-slate-700 font-medium animate-in fade-in zoom-in-95 duration-150"
+                                        style={{ top: matrixCtx.y, left: matrixCtx.x }}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <div className="px-3 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                            {matrixCtx.type === 'size' ? '✏️ Taille' : '🎨 Couleur'}: {matrixCtx.name}
+                                        </div>
+                                        <div className="h-px bg-slate-100 my-1"></div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEditingMatrixItem({ type: matrixCtx.type, index: matrixCtx.index, value: matrixCtx.name || '' });
+                                                setMatrixCtx(null);
+                                            }}
+                                            className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-indigo-700 flex items-center gap-2.5 font-bold"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                                            Renommer
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (matrixCtx.type === 'size') {
+                                                    if (confirm(`Supprimer la taille "${matrixCtx.name}" et toutes ses quantités ?`)) removeSize(matrixCtx.index);
+                                                } else {
+                                                    if (confirm(`Supprimer la couleur "${matrixCtx.name}" et toutes ses quantités ?`)) removeColor(matrixCtx.id!);
+                                                }
+                                                setMatrixCtx(null);
+                                            }}
+                                            className="w-full text-left px-4 py-2 hover:bg-rose-50 text-rose-600 flex items-center gap-2.5"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                                            Supprimer
+                                        </button>
+                                    </div>,
+                                    document.body
+                                )}
+                            </div>
+
+                            {/* MATERIAL SIMULATION CARD */}
+                            <div className="bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden mb-6">
+                                <div className="p-8 sm:p-10 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center">
+                                            <PackageSearch className="w-6 h-6 text-indigo-600" />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-black text-slate-800 text-2xl tracking-tight">Simulation Fournitures (Magasin)</h3>
+                                            <p className="text-slate-500 font-medium mt-1">Disponibilité des matières requises pour cette commande.</p>
+                                        </div>
+                                    </div>
+                                    <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold flex items-center gap-2">
+                                        Modèle: <span className="text-indigo-600">{ordre.qteTotale} pcs</span>
+                                    </div>
+                                </div>
+
+                                <div className="p-4 sm:p-8 overflow-x-auto bg-slate-50">
+                                    {requiredMaterials.length === 0 ? (
+                                        <div className="text-center py-8 text-slate-500 font-medium bg-white rounded-xl border border-dashed border-slate-300">
+                                            Aucune fourniture définie pour ce modèle dans la Fiche de Coût.
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-sm border-collapse rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm">
+                                            <thead>
+                                                <tr className="bg-slate-100 text-slate-600 border-b border-slate-200 text-xs uppercase tracking-wider text-left">
+                                                    <th className="py-4 px-4 font-black w-1/3 text-slate-700">Fourniture / Article</th>
+                                                    <th className="py-4 px-4 font-black">Besoin Production</th>
+                                                    <th className="py-4 px-4 font-black">Stock Magasin</th>
+                                                    <th className="py-4 px-4 font-black text-center w-32">Statut</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {requiredMaterials.map((mat, idx) => (
+                                                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="py-4 px-4 font-bold text-slate-800">
+                                                            {mat.name} <span className="text-[10px] text-slate-400 font-medium block">{mat.fournisseur || 'Sans fournisseur'}</span>
+                                                        </td>
+                                                        <td className="py-4 px-4">
+                                                            <div className="text-base font-black text-indigo-600">
+                                                                {mat.neededForProduction} <span className="text-xs font-bold text-slate-400 uppercase">{mat.unit}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-4 px-4">
+                                                            <div className={`text-base font-black ${mat.isSufficient ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                                {mat.stockActuel} <span className="text-xs font-bold opacity-70 uppercase">{mat.unit}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-4 px-4 text-center">
+                                                            {mat.isSufficient ? (
+                                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-black uppercase tracking-wide border border-emerald-200">
+                                                                    <CheckCircle2 className="w-3.5 h-3.5" /> OK
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-100 text-rose-700 rounded-lg text-xs font-black uppercase tracking-wide border border-rose-200 shadow-sm shadow-rose-100">
+                                                                    <AlertCircle className="w-3.5 h-3.5" /> Rupture
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )}
                                 </div>
                             </div>
 

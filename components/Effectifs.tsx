@@ -16,6 +16,7 @@ type ChaineEffectif = {
     sp: number;
     stager: number;
     reserve: number;
+    absent: number;
 };
 
 type GlobalIndirects = {
@@ -29,7 +30,7 @@ type GlobalIndirects = {
 
 export default function Effectifs({ settings }: EffectifsProps) {
     const defaultChaine: ChaineEffectif = {
-        recta: 0, surjet: 0, transp: 0, plancha: 0, man: 0, controle: 0, sp: 0, stager: 0, reserve: 0
+        recta: 0, surjet: 0, transp: 0, plancha: 0, man: 0, controle: 0, sp: 0, stager: 0, reserve: 0, absent: 0
     };
 
     const generateInitialChaines = (count: number) => {
@@ -158,7 +159,7 @@ export default function Effectifs({ settings }: EffectifsProps) {
                                         {Object.keys(chaines).map(chaine => (
                                             <th key={chaine} className="bg-white border-b border-l border-slate-100 p-4 text-center">
                                                 <div className="inline-block px-4 py-1.5 bg-indigo-50 rounded-lg border border-indigo-100">
-                                                    <span className="font-black text-indigo-700 uppercase tracking-wider">{chaine}</span>
+                                                    <span className="font-black text-indigo-700 uppercase tracking-wider">{settings.chainNames?.[chaine] || chaine}</span>
                                                 </div>
                                             </th>
                                         ))}
@@ -166,9 +167,12 @@ export default function Effectifs({ settings }: EffectifsProps) {
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
                                     {Object.keys(defaultChaine).map((role) => (
-                                        <tr key={role} className="hover:bg-indigo-50/30 transition-colors group">
-                                            <td className="border-r border-slate-100 p-4 bg-slate-50/50 group-hover:bg-indigo-50/50 transition-colors">
-                                                <div className="font-bold text-slate-700 uppercase tracking-wider">{role}</div>
+                                        <tr key={role} className={`hover:bg-indigo-50/30 transition-colors group ${role === 'absent' ? 'bg-rose-50/20' : ''}`}>
+                                            <td className={`border-r border-slate-100 p-4 transition-colors ${role === 'absent' ? 'bg-rose-50/50 text-rose-700' : 'bg-slate-50/50 group-hover:bg-indigo-50/50 text-slate-700'}`}>
+                                                <div className="font-bold uppercase tracking-wider flex items-center gap-2">
+                                                    {role === 'absent' && <Users className="w-4 h-4 text-rose-500" />}
+                                                    {role === 'absent' ? 'ABSENTS (Abs)' : role}
+                                                </div>
                                             </td>
                                             {Object.entries(chaines).map(([chaineId, data]) => (
                                                 <td key={chaineId} className="p-3 border-l border-slate-100">
@@ -177,7 +181,7 @@ export default function Effectifs({ settings }: EffectifsProps) {
                                                             type="number" min="0"
                                                             value={data[role as keyof ChaineEffectif] || ''}
                                                             onChange={(e) => handleChaineChange(chaineId, role as keyof ChaineEffectif, e.target.value)}
-                                                            className="w-full text-center py-2.5 font-black text-lg text-slate-700 bg-slate-50 border border-slate-200 outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-xl transition-all placeholder:text-slate-300"
+                                                            className={`w-full text-center py-2.5 font-black text-lg bg-slate-50 border outline-none focus:bg-white focus:ring-4 rounded-xl transition-all placeholder:text-slate-300 ${role === 'absent' ? 'text-rose-600 border-rose-200 focus:border-rose-400 focus:ring-rose-500/10' : 'text-slate-700 border-slate-200 focus:border-indigo-500 focus:ring-indigo-500/10'}`}
                                                             placeholder="0"
                                                         />
                                                     </div>

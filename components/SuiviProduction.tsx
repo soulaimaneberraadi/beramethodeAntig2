@@ -1,645 +1,573 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { ModelData, SuiviData, AppSettings } from '../types';
-import { Activity, Calendar, Hash, Layers, Users, Clock, Printer, Save, Barcode, AlertTriangle, ShieldAlert, BadgeInfo, Play, CheckCircle2, Trash2, Plus } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ModelData, SuiviData, AppSettings, PlanningEvent } from '../types';
+import { Activity, Printer, PackageCheck, Plus, Trash2, CalendarDays, Box, Target, AlertTriangle, ShieldAlert, Timer, CheckCircle2, Factory, Filter, Settings2 } from 'lucide-react';
 
 interface SuiviProductionProps {
     models: ModelData[];
     suivis: SuiviData[];
     setSuivis: React.Dispatch<React.SetStateAction<SuiviData[]>>;
+    planningEvents?: PlanningEvent[];
     settings: AppSettings;
 }
 
-export default function SuiviProduction({ models, suivis = [], setSuivis, settings }: SuiviProductionProps) {
-    const [selectedSuiviId, setSelectedSuiviId] = useState<string>('');
-    const [client, setClient] = useState('BERAMETHODE SA');
-    const [dateExport, setDateExport] = useState(new Date().toISOString().split('T')[0]);
+export default function SuiviProduction({ models, suivis = [], setSuivis, planningEvents = [], settings }: SuiviProductionProps) {
+    // Filter States
+    const [filterChaine, setFilterChaine] = useState<string>('ALL');
+    const [filterModele, setFilterModele] = useState<string>('ALL');
+    const [filterDate, setFilterDate] = useState<string>('ALL');
 
-    // Auto-select latest suivi if none selected or selected doesn't exist
-    useEffect(() => {
-        if (suivis && suivis.length > 0) {
-            if (!selectedSuiviId || !suivis.find(s => s.id === selectedSuiviId)) {
-                // Select the most recently added setting (last in array)
-                setSelectedSuiviId(suivis[suivis.length - 1].id);
+    // Dynamic HOURS from Settings
+    const { HOURS, HOUR_KEYS } = useMemo(() => {
+        const startStr = settings.workingHoursStart || "08:00";
+        const endStr = settings.workingHoursEnd || "18:00";
+        const pauses = settings.pauses || [];
+
+        let startMin = parseInt(startStr.split(':')[0]) * 60 + parseInt(startStr.split(':')[1]);
+        if (isNaN(startMin)) startMin = 480;
+
+        let endMin = parseInt(endStr.split(':')[0]) * 60 + parseInt(endStr.split(':')[1]);
+        if (isNaN(endMin)) endMin = 1080;
+
+        const hoursArr: string[] = [];
+        const keysArr: string[] = [];
+
+        for (let m = startMin; m < endMin; m += 60) {
+            const blockEnd = m + 60;
+            let overlap = 0;
+            pauses.forEach(p => {
+                const pStart = parseInt(p.start.split(':')[0]) * 60 + parseInt(p.start.split(':')[1]);
+                const pEnd = parseInt(p.end.split(':')[0]) * 60 + parseInt(p.end.split(':')[1]);
+                const overlapStart = Math.max(m, pStart);
+                const overlapEnd = Math.min(blockEnd, pEnd);
+                if (overlapEnd > overlapStart) overlap += (overlapEnd - overlapStart);
+            });
+
+            if (overlap < 30) {
+                const hStart = Math.floor(m / 60).toString().padStart(2, '0');
+                const mStart = (m % 60).toString().padStart(2, '0');
+                hoursArr.push(`${hStart}:${mStart}`);
+                keysArr.push(`h${hStart}${mStart}`);
             }
-        } else {
-            setSelectedSuiviId('');
         }
-    }, [suivis, selectedSuiviId]);
 
-    // Kiosk Mode State
-    const [isKioskMode, setIsKioskMode] = useState(false);
-    const [scannedBarcode, setScannedBarcode] = useState('');
-    const [scanMessage, setScanMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
+        if (hoursArr.length === 0) {
+            return {
+                HOURS: ['08:00', '09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'],
+                HOUR_KEYS: ['h0800', 'h0900', 'h1000', 'h1100', 'h1400', 'h1500', 'h1600', 'h1700']
+            }
+        }
 
-    // New state variables for filtering
-    const [dateFilter, setDateFilter] = useState('');
-    const [chaineFilter, setChaineFilter] = useState('');
-    const [searchQuery, setSearchQuery] = useState('');
+        return { HOURS: hoursArr, HOUR_KEYS: keysArr };
+    }, [settings.workingHoursStart, settings.workingHoursEnd, settings.pauses]);
 
-    const ALL_CHAINES = useMemo(() => Array.from({ length: settings.chainsCount }, (_, i) => `CHAINE ${i + 1}`), [settings.chainsCount]);
 
-    // Active Suivi Object
-    const activeSuivi = suivis.find(s => s.id === selectedSuiviId) || null;
-    const actualModel = activeSuivi ? models.find(m => m.id === activeSuivi.planningId) || models[0] : null;
+    // Extract distinct options for filters
+    const allChains = useMemo(() => {
+        const chains = new Set<string>();
+        planningEvents.forEach(p => chains.add(p.chaineId));
+        return Array.from(chains).sort();
+    }, [planningEvents]);
 
-    // Hourly tracking state
-    const HOURS = ['08:30', '09:30', '10:30', '11:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30'];
-    const HOUR_KEYS = ['h0830', 'h0930', 'h1030', 'h1130', 'h1430', 'h1530', 'h1630', 'h1730', 'h1830', 'h1930'] as const;
+    const allModels = useMemo(() => {
+        const mods = new Set<{ id: string, name: string }>();
+        planningEvents.forEach(p => {
+            if (filterChaine !== 'ALL' && p.chaineId !== filterChaine) return;
+            const m = models.find(mod => mod.id === p.modelId);
+            if (m) mods.add({ id: m.id, name: m.meta_data.nom_modele });
+        });
+        return Array.from(mods).filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i).sort((a, b) => a.name.localeCompare(b.name));
+    }, [planningEvents, models, filterChaine]);
 
-    const pJournaliereTarget = activeSuivi?.pJournaliere || 400; // Default target
-    const targetPerHour = Math.round(pJournaliereTarget / 10);
+    const allDates = useMemo(() => {
+        const dts = new Set<string>();
+        suivis.forEach(s => {
+            const plan = planningEvents.find(p => p.id === s.planningId);
+            if (plan && (filterChaine === 'ALL' || plan.chaineId === filterChaine) && (filterModele === 'ALL' || plan.modelId === filterModele)) {
+                dts.add(s.date);
+            }
+        });
+        return Array.from(dts).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    }, [suivis, planningEvents, filterChaine, filterModele]);
 
-    const handleHourlyChange = (hourKey: keyof SuiviData['sorties'], value: string) => {
-        if (!activeSuivi || !setSuivis) return;
 
-        const val = parseInt(value) || 0;
-        setSuivis(prev => prev.map(s => {
-            if (s.id === selectedSuiviId) {
-                const newSorties = { ...s.sorties, [hourKey]: val };
-                const totalHeure = Object.values(newSorties).reduce((a, b) => (a || 0) + (b || 0), 0);
-                return {
-                    ...s,
-                    sorties: newSorties,
-                    totalHeure,
-                    enCour: s.entrer - totalHeure,
-                    resteSortie: (s.resteEntrer + s.entrer) - totalHeure
+    // Group Data by Chain and Model applying Filters
+    const groupedData = useMemo(() => {
+        const chains: Record<string, { chaineId: string, superviseur: string, productionFiles: Record<string, { planningId: string, model: ModelData, events: SuiviData[] }> }> = {};
+
+        suivis.forEach(s => {
+            if (filterDate !== 'ALL' && s.date !== filterDate) return;
+
+            const plan = planningEvents.find(p => p.id === s.planningId);
+            if (!plan) return;
+
+            if (filterChaine !== 'ALL' && plan.chaineId !== filterChaine) return;
+            if (filterModele !== 'ALL' && plan.modelId !== filterModele) return;
+
+            const model = models.find(m => m.id === plan.modelId);
+            if (!model || model.workflowStatus === 'EXPORT') return;
+
+            if (!chains[plan.chaineId]) {
+                chains[plan.chaineId] = {
+                    chaineId: plan.chaineId,
+                    superviseur: plan.superviseur || 'Superviseur',
+                    productionFiles: {}
                 };
             }
-            return s;
-        }));
+
+            if (!chains[plan.chaineId].productionFiles[plan.id]) {
+                chains[plan.chaineId].productionFiles[plan.id] = {
+                    planningId: plan.id,
+                    model: model,
+                    events: []
+                };
+            }
+
+            chains[plan.chaineId].productionFiles[plan.id].events.push(s);
+        });
+
+        const sortedChains = Object.values(chains).sort((a, b) => a.chaineId.localeCompare(b.chaineId));
+        sortedChains.forEach(chain => {
+            Object.values(chain.productionFiles).forEach(pf => {
+                pf.events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            });
+        });
+
+        return sortedChains;
+    }, [suivis, planningEvents, models, filterChaine, filterModele, filterDate]);
+
+    // Helpers
+    const getBaseTime = (model: ModelData) => {
+        return (model.gamme_operatoire || []).reduce((acc, op) => acc + (op.time || 0), 0);
     };
 
-    const handleDowntimeChange = (hourKey: string, reason: string) => {
-        if (!activeSuivi || !setSuivis) return;
+    const getDayName = (dateStr: string) => {
+        const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+        return days[new Date(dateStr).getDay()] || '';
+    };
+
+    const calculateEfficiency = (suivi: SuiviData, baseTime: number) => {
+        if (!suivi.totalHeure || !suivi.totalWorkers || baseTime === 0) return 0;
+        const activeHours = HOUR_KEYS.filter(k => (suivi.sorties[k] ?? -1) >= 0).length;
+        if (activeHours === 0) return 0;
+
+        const totalPresenceMinutes = suivi.totalWorkers * (activeHours * 60);
+        if (totalPresenceMinutes === 0) return 0;
+
+        // Apply QC penalties directly or just visually
+        const validProduction = Math.max(0, suivi.totalHeure - (suivi.defauts?.reduce((acc, d) => acc + d.quantity, 0) || 0));
+
+        const earnedMinutes = validProduction * (baseTime * 1.15); // +15% majoration
+        return Math.round((earnedMinutes / totalPresenceMinutes) * 100);
+    };
+
+    const calculateModelEfficiency = (events: SuiviData[], baseTime: number) => {
+        const totalValidProduced = events.reduce((acc, s) => acc + Math.max(0, s.totalHeure - (s.defauts?.reduce((a, d) => a + d.quantity, 0) || 0)), 0);
+        const totalActiveHours = events.reduce((acc, s) => acc + HOUR_KEYS.filter(k => (s.sorties[k] ?? -1) >= 0).length * s.totalWorkers, 0);
+
+        if (totalActiveHours === 0 || baseTime === 0) return 0;
+
+        const earnedMinutes = totalValidProduced * (baseTime * 1.15);
+        const presenceMinutes = totalActiveHours * 60;
+        return Math.round((earnedMinutes / presenceMinutes) * 100);
+    };
+
+    // Actions
+    const handleUpdateHourly = (id: string, hourKey: string, value: string) => {
+        let val = parseInt(value);
+        if (isNaN(val) || val < 0) {
+            val = -1; // -1 represents empty
+        }
+
         setSuivis(prev => prev.map(s => {
-            if (s.id === selectedSuiviId) {
-                const newDowntimes = { ...(s.downtimes || {}), [hourKey]: reason };
-                return { ...s, downtimes: newDowntimes };
+            if (s.id === id) {
+                const newSorties = { ...s.sorties, [hourKey]: val === -1 ? undefined : val };
+                const totalHeure = Object.values(newSorties).reduce((a, b) => (a || 0) + (b || 0), 0);
+                return { ...s, sorties: newSorties, totalHeure };
             }
             return s;
         }));
     };
 
-    const handleWorkerChange = (role: string, value: string) => {
-        if (!activeSuivi || !setSuivis) return;
-        const val = parseInt(value) || 0;
+    const handleDowntimeChange = (id: string, hourKey: string, reason: string) => {
+        setSuivis(prev => prev.map(s => s.id === id ? { ...s, downtimes: { ...(s.downtimes || {}), [hourKey]: reason } } : s));
+    };
+
+    const handleDefectChange = (id: string, value: string) => {
+        const val = Math.max(0, parseInt(value) || 0); // No negatives Let's prevent it visually too
         setSuivis(prev => prev.map(s => {
-            if (s.id === selectedSuiviId) {
-                const updated = { ...s, [role]: val };
-                updated.totalWorkers = (updated.machinistes || 0) + (updated.tracage || 0) + (updated.preparation || 0) + (updated.finition || 0) + (updated.controle || 0);
+            if (s.id === id) {
+                return { ...s, defauts: val > 0 ? [{ id: '1', hour: 'all', type: 'General', quantity: val, notes: '' }] : [] }
+            }
+            return s;
+        }));
+    };
+
+    const handleUpdateWorker = (id: string, field: string, value: string) => {
+        const val = Math.max(0, parseInt(value) || 0); // Positives only
+        setSuivis(prev => prev.map(s => {
+            if (s.id === id) {
+                const updated = { ...s, [field]: val };
+                updated.totalWorkers = (Number(updated.machinistes) || 0) + (Number(updated.tracage) || 0) + (Number(updated.preparation) || 0) + (Number(updated.finition) || 0) + (Number(updated.controle) || 0);
                 return updated;
             }
             return s;
         }));
     };
 
-    const handleEntrerChange = (val: string) => {
-        if (!activeSuivi || !setSuivis) return;
-        const entrer = parseInt(val) || 0;
-        setSuivis(prev => prev.map(s => {
-            if (s.id === selectedSuiviId) {
-                return {
-                    ...s,
-                    entrer,
-                    enCour: entrer - s.totalHeure,
-                    resteEntrer: s.resteEntrer > 0 ? s.resteEntrer : s.resteEntrer
-                };
-            }
-            return s;
-        }));
-    };
+    const handleAddDay = (planningId: string) => {
+        const existingSuivis = suivis.filter(s => s.planningId === planningId);
+        let nextDateStr = new Date().toISOString().split('T')[0];
 
-    // --- QC Defauts Logic ---
-    const addDefect = () => {
-        if (!activeSuivi || !setSuivis) return;
-        const newDefect = { id: Date.now().toString(), hour: HOURS[0], type: 'Couture', quantity: 1, notes: '' };
-        setSuivis(prev => prev.map(s => s.id === selectedSuiviId ? { ...s, defauts: [...(s.defauts || []), newDefect] } : s));
-    };
+        if (existingSuivis.length > 0) {
+            const sorted = [...existingSuivis].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            const lastDate = new Date(sorted[0].date);
+            lastDate.setDate(lastDate.getDate() + 1);
+            nextDateStr = lastDate.toISOString().split('T')[0];
+        }
 
-    const updateDefect = (id: string, field: string, value: any) => {
-        if (!activeSuivi || !setSuivis) return;
-        setSuivis(prev => prev.map(s => {
-            if (s.id === selectedSuiviId) {
-                return { ...s, defauts: (s.defauts || []).map(d => d.id === id ? { ...d, [field]: value } : d) };
-            }
-            return s;
-        }));
-    };
+        while (suivis.some(s => s.planningId === planningId && s.date === nextDateStr)) {
+            const d = new Date(nextDateStr);
+            d.setDate(d.getDate() + 1);
+            nextDateStr = d.toISOString().split('T')[0];
+        }
 
-    const removeDefect = (id: string) => {
-        if (!activeSuivi || !setSuivis) return;
-        setSuivis(prev => prev.map(s => s.id === selectedSuiviId ? { ...s, defauts: (s.defauts || []).filter(d => d.id !== id) } : s));
-    }
-
-    // --- OEE / TRS Calculation ---
-    // TRS = Disponibilité * Performance * Qualité
-    const calculateTRS = () => {
-        if (!activeSuivi) return { d: 0, p: 0, q: 0, trs: 0, defects: 0 };
-
-        const totalProductionHours = 10; // 10 slots
-        let hoursWorked = 0;
-        let totalDowntimePenalty = 0;
-
-        // Calculate hours that have actual production recorded
-        HOURS.forEach((h, idx) => {
-            const key = HOUR_KEYS[idx];
-            if ((activeSuivi.sorties[key] ?? -1) >= 0) { // Has value
-                hoursWorked++;
-                if (activeSuivi.downtimes && activeSuivi.downtimes[key]) {
-                    totalDowntimePenalty += 0.2; // roughly say 12 mins lost per reason as a mock metric
-                }
-            }
-        });
-
-        if (hoursWorked === 0) return { d: 0, p: 0, q: 0, trs: 0, defects: 0 };
-
-        // Disponibilité (Availability) = (Hours Worked - Downtime) / Hours Worked
-        const disponibilite = Math.max(0, (hoursWorked - totalDowntimePenalty) / hoursWorked);
-
-        // Performance = (Total Produced / Operating Hours) / Optimal Rate
-        const currentRate = activeSuivi.totalHeure / hoursWorked;
-        const performance = Math.min(1, currentRate / targetPerHour);
-
-        // Qualité = (Good - Defects) / Good
-        const totalDefects = (activeSuivi.defauts || []).reduce((acc, def) => acc + def.quantity, 0);
-        const quality = activeSuivi.totalHeure > 0 ? Math.max(0, (activeSuivi.totalHeure - totalDefects) / activeSuivi.totalHeure) : 1;
-
-        const trs = (disponibilite * performance * quality) * 100;
-
-        return {
-            d: Math.round(disponibilite * 100),
-            p: Math.round(performance * 100),
-            q: Math.round(quality * 100),
-            trs: Math.round(trs),
-            defects: totalDefects
+        const newSuivi: SuiviData = {
+            id: `suivi_${Date.now()}`,
+            planningId,
+            date: nextDateStr,
+            entrer: 0,
+            sorties: {},
+            totalHeure: 0,
+            pJournaliere: 400,
+            enCour: 0,
+            resteEntrer: 0,
+            resteSortie: 0,
+            machinistes: 0,
+            tracage: 0,
+            preparation: 0,
+            finition: 0,
+            controle: 0,
+            absent: 0,
+            totalWorkers: 0
         };
+        setSuivis(prev => [...prev, newSuivi]);
     };
 
-    const trsData = calculateTRS();
-
-    // --- Kiosk Mode Logic ---
-    const handleBarcodeSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!activeSuivi || !actualModel || !setSuivis) return;
-
-        // Find if this barcode exists in the model's ordreCoupe (mock validation)
-        const order = actualModel.ordreCoupe;
-        let found = false;
-        let qty = 1;
-
-        if (order && order.faisceaux) {
-            const faisceau = order.faisceaux.find(f => f.codeBarre === scannedBarcode);
-            if (faisceau) {
-                found = true;
-                qty = faisceau.quantite;
-            }
-        } else {
-            // Mock success for testing if no logic present
-            found = true;
-            qty = 10; // default bundle size
+    const handleDeleteSuivi = (id: string) => {
+        if (confirm('Supprimer cette ligne ?')) {
+            setSuivis(prev => prev.filter(s => s.id !== id));
         }
-
-        if (found) {
-            // Find current active hour (mock: just take the first one without target met or just the current physical time)
-            // For demo, just add to h0830 or the current lowest hour
-            const hourKey = HOUR_KEYS.find(k => (activeSuivi.sorties[k] || 0) < targetPerHour) || HOUR_KEYS[0];
-
-            const currentVal = activeSuivi.sorties[hourKey] || 0;
-            handleHourlyChange(hourKey, (currentVal + qty).toString());
-
-            setScanMessage({ text: `Succès : +${qty} pièces enregistrées sur le Faisceau ${scannedBarcode}`, type: 'success' });
-        } else {
-            setScanMessage({ text: `Erreur : Faisceau non reconnu.`, type: 'error' });
-        }
-
-        setScannedBarcode('');
-        setTimeout(() => setScanMessage(null), 3000);
     };
 
+    const handleExport = (model: ModelData) => {
+        if (confirm(`Clôturer la production pour ${model.meta_data.nom_modele} ?`)) {
+            const event = new CustomEvent('export-model', { detail: { modelId: model.id } });
+            window.dispatchEvent(event);
+        }
+    };
 
     return (
-        <div className="h-full flex flex-col bg-slate-50 relative pb-20 overflow-y-auto">
-            {/* HEADER */}
-            <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-sm z-20 print:hidden sticky top-0">
-                <div>
-                    <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+        <div className="h-full flex flex-col bg-slate-50 overflow-y-auto pb-24">
+            {/* HEADER & FILTERS */}
+            <div className="bg-white px-6 py-4 flex flex-col gap-4 shrink-0 shadow-sm z-20 print:hidden sticky top-0 border-b border-slate-200">
+                <div className="flex items-center justify-between">
+                    <h1 className="text-xl font-black text-slate-800 flex items-center gap-2">
                         <Activity className="w-6 h-6 text-indigo-600" />
-                        MES Avancé : Suivi & TRS
+                        SUIVI DE PRODUCTION
                     </h1>
-                    <p className="text-slate-500 mt-1">Fiche journalière intelligente (Downtime, OEE/TRS, Codes-Barres).</p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <select
-                        className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:border-indigo-500 font-bold text-slate-800"
-                        value={selectedSuiviId}
-                        onChange={e => setSelectedSuiviId(e.target.value)}
-                    >
-                        <option value="">Sélectionner un Suivi Lancer...</option>
-                        {suivis.map(s => (
-                            <option key={s.id} value={s.id}>
-                                {s.date} - Suivi {s.id.split('_')[1]}
-                            </option>
-                        ))}
-                    </select>
-                    <select
-                        value={chaineFilter}
-                        onChange={(e) => setChaineFilter(e.target.value)}
-                        className="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 font-medium cursor-pointer"
-                    >
-                        <option value="">Toutes Chaînes</option>
-                        {ALL_CHAINES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold shadow-sm transition-all border border-slate-300">
+
+                    <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold font-bold transition-all border border-slate-200 shadow-sm">
                         <Printer className="w-4 h-4" /> Imprimer
                     </button>
-                    {activeSuivi && (
-                        <button onClick={() => setIsKioskMode(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-sm shadow-indigo-200 transition-all">
-                            <Barcode className="w-4 h-4" /> Kiosque Scan
-                        </button>
-                    )}
+                </div>
+
+                {/* FILTERS BAR */}
+                <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-2 px-2 border-r border-slate-200">
+                        <Filter className="w-4 h-4 text-slate-400" />
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest hidden sm:block">Filtres :</span>
+                    </div>
+
+                    <select className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 shadow-sm cursor-pointer"
+                        value={filterChaine} onChange={e => { setFilterChaine(e.target.value); setFilterModele('ALL'); setFilterDate('ALL'); }}>
+                        <option value="ALL">Toutes les Chaînes</option>
+                        {allChains.map(c => <option key={c} value={c}>{settings.chainNames?.[c] || c}</option>)}
+                    </select>
+
+                    <select className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 shadow-sm cursor-pointer"
+                        value={filterModele} onChange={e => setFilterModele(e.target.value)}>
+                        <option value="ALL">Tous les Modèles</option>
+                        {allModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+
+                    <select className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 shadow-sm cursor-pointer"
+                        value={filterDate} onChange={e => setFilterDate(e.target.value)}>
+                        <option value="ALL">Tous les Jours</option>
+                        {allDates.map(d => <option key={d} value={d}>{new Date(d).toLocaleDateString('fr-FR')}</option>)}
+                    </select>
+
+                    <div className="flex-1"></div>
+
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-lg text-indigo-700 text-xs font-bold shadow-sm" title="Géré depuis la page Paramètres">
+                        <Settings2 className="w-3.5 h-3.5" />
+                        Horaires sync.
+                    </div>
                 </div>
             </div>
 
-            {/* CONTENT = EXCEL LIKE SHEET */}
-            {!activeSuivi ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
-                    <Layers className="w-16 h-16 text-slate-300 mb-4" />
-                    <p className="font-medium text-lg text-slate-600 mb-2">Aucun suivi sélectionné.</p>
-                    <p className="text-sm">Allez dans le <strong>Planning</strong> et lancez la production pour initier un suivi.</p>
-                </div>
-            ) : (
-                <div className="flex-1 p-6 w-full max-w-none mx-auto print:p-0 print:m-0 print:max-w-none space-y-6">
-
-                    {/* TRS / OEE DASHBOARD */}
-                    <div className="grid grid-cols-4 gap-4 print:hidden">
-                        <div className="bg-slate-800 rounded-2xl p-5 shadow-lg text-white relative overflow-hidden flex flex-col justify-between">
-                            <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-xl pointer-events-none"></div>
-                            <div className="flex items-center gap-2 mb-2 opacity-80">
-                                <Activity className="w-4 h-4" />
-                                <span className="text-xs font-bold uppercase tracking-widest">T.R.S (OEE)</span>
-                            </div>
-                            <div className={`text-5xl font-black ${trsData.trs >= 80 ? 'text-emerald-400' : trsData.trs >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>
-                                {trsData.trs}<span className="text-2xl opacity-50">%</span>
-                            </div>
-                            <p className="text-xs opacity-60 mt-2">Taux de Rendement Synthétique</p>
-                        </div>
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-                            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Disponibilité</span>
-                            <div className="text-3xl font-black text-slate-800">{trsData.d}%</div>
-                            <div className="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
-                                <div className="bg-blue-500 h-full" style={{ width: `${trsData.d}%` }}></div>
-                            </div>
-                        </div>
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-                            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Performance</span>
-                            <div className="text-3xl font-black text-slate-800">{trsData.p}%</div>
-                            <div className="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
-                                <div className="bg-amber-500 h-full" style={{ width: `${trsData.p}%` }}></div>
-                            </div>
-                        </div>
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-                            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Qualité</span>
-                            <div className="text-3xl font-black text-slate-800">{trsData.q}%</div>
-                            <div className="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
-                                <div className="bg-emerald-500 h-full" style={{ width: `${trsData.q}%` }}></div>
-                            </div>
-                            {trsData.defects > 0 && <span className="text-[10px] text-red-500 font-bold mt-2 absolute bottom-2 right-4">{trsData.defects} défauts signalés</span>}
-                        </div>
+            <div className="p-6">
+                {groupedData.length === 0 ? (
+                    <div className="text-center py-20">
+                        <Box className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                        <h2 className="text-xl font-bold text-slate-400">Aucune production pour ce filtre</h2>
                     </div>
+                ) : (
+                    groupedData.map(chain => (
+                        <div key={chain.chaineId} className="mb-10 last:mb-0">
 
-
-                    {/* The "Sheet" */}
-                    <div className="bg-white border border-slate-300 shadow-xl print:shadow-none print:border-none p-8 print:p-0" id="suivi-sheet">
-
-                        {/* SHEET HEADER */}
-                        <div className="flex justify-between items-start mb-6 border-b-2 border-slate-800 pb-4">
-                            <div>
-                                <h1 className="text-3xl font-black uppercase tracking-widest text-slate-900">Suivi & TRS</h1>
-                                <p className="text-slate-600 font-bold tracking-widest uppercase flex items-center gap-2">
-                                    BERAMETHODE <BadgeInfo className="w-4 h-4 text-slate-400" /> Phase 13
-                                </p>
+                            {/* CHAIN HEADER */}
+                            <div className="flex items-center gap-3 mb-4">
+                                <Factory className="w-5 h-5 text-indigo-500" />
+                                <h2 className="text-lg font-black tracking-widest text-slate-800 uppercase">{settings.chainNames?.[chain.chaineId] || chain.chaineId}</h2>
+                                <span className="ml-2 px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-xs font-bold uppercase tracking-wider">{chain.superviseur}</span>
                             </div>
-                            <div className="text-right flex items-center gap-4">
-                                {trsData.trs < 65 && activeSuivi.totalHeure > 0 && (
-                                    <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 px-3 py-1.5 rounded-lg animate-pulse print:hidden">
-                                        <AlertTriangle className="w-5 h-5" />
-                                        <div className="text-left leading-tight">
-                                            <span className="block text-[9px] font-black uppercase">Andon Alert</span>
-                                            <span className="block text-xs font-bold">TRS Critique ({trsData.trs}%)</span>
-                                        </div>
-                                    </div>
-                                )}
-                                <div>
-                                    <p className="font-bold text-slate-500 uppercase text-xs">Date</p>
-                                    <p className="text-xl font-black text-slate-800">{activeSuivi.date}</p>
-                                </div>
-                            </div>
-                        </div>
 
-                        {/* INFO GRID */}
-                        <div className="grid grid-cols-3 gap-6 mb-8 bg-slate-50 p-4 border border-slate-300 rounded-lg">
-                            <div className="space-y-2">
-                                <div className="flex border-b border-slate-200 pb-1">
-                                    <span className="w-32 font-bold text-slate-600 uppercase text-xs">Client</span>
-                                    <input type="text" className="flex-1 bg-transparent font-black text-sm outline-none uppercase text-slate-800" value={client} onChange={e => setClient(e.target.value)} />
-                                </div>
-                                <div className="flex border-b border-slate-200 pb-1">
-                                    <span className="w-32 font-bold text-slate-600 uppercase text-xs">Model Ref</span>
-                                    <span className="flex-1 font-black text-indigo-700 text-sm">{actualModel?.meta_data.nom_modele || 'N/A'} {actualModel?.meta_data.reference ? `(${actualModel.meta_data.reference})` : ''}</span>
-                                </div>
-                                <div className="flex border-b border-slate-200 pb-1">
-                                    <span className="w-32 font-bold text-slate-600 uppercase text-xs">Coupes</span>
-                                    <span className="flex-1 font-black text-sm text-slate-800">{activeSuivi.resteEntrer + activeSuivi.entrer} pcs</span>
-                                </div>
-                            </div>
-                            <div className="space-y-2 border-l border-slate-200 pl-6">
-                                <div className="flex border-b border-slate-200 pb-1">
-                                    <span className="w-32 font-bold text-slate-600 uppercase text-xs">Date Livraison</span>
-                                    <input type="date" className="flex-1 bg-transparent font-black text-sm outline-none text-slate-800" value={dateExport} onChange={e => setDateExport(e.target.value)} />
-                                </div>
-                                <div className="flex border-b border-slate-200 pb-1 text-emerald-700">
-                                    <span className="w-32 font-bold uppercase text-xs opacity-70">Total Sortie</span>
-                                    <span className="flex-1 font-black text-sm text-right">{activeSuivi.totalHeure} pcs</span>
-                                </div>
-                                <div className="flex border-b border-slate-200 pb-1 text-rose-700">
-                                    <span className="w-32 font-bold uppercase text-xs opacity-70">Reste (Manque)</span>
-                                    <span className="flex-1 font-black text-sm text-right">{(activeSuivi.resteEntrer + activeSuivi.entrer) - activeSuivi.totalHeure} pcs</span>
-                                </div>
-                            </div>
-                            <div className="col-span-1 flex flex-col justify-center items-center bg-indigo-50 border border-indigo-200 rounded-lg p-3">
-                                <span className="text-xs font-bold text-indigo-800 uppercase text-center block mb-1">Objectif S. Horaire (P° / 10h)</span>
-                                <div className="flex items-end gap-1 text-indigo-700">
-                                    <span className="text-4xl font-black">{targetPerHour}</span>
-                                    <span className="font-bold text-sm mb-1 pb-1 border-b border-indigo-300">pcs/h</span>
-                                </div>
-                            </div>
-                        </div>
+                            <div className="space-y-6">
+                                {Object.values(chain.productionFiles).map(file => {
+                                    const baseTime = getBaseTime(file.model);
+                                    const totalProduced = file.events.reduce((acc, s) => acc + s.totalHeure, 0);
+                                    const targetQuantity = file.model.meta_data.quantity || 1;
+                                    const resteProduire = targetQuantity - totalProduced;
+                                    const avgPerHour = totalProduced / (file.events.reduce((acc, s) => acc + HOUR_KEYS.filter(k => (s.sorties[k] ?? -1) >= 0).length, 0) || 1);
+                                    const hoursLeft = avgPerHour > 0 ? Math.ceil(resteProduire / avgPerHour) : 0;
+                                    const dailyTarget = file.events.length > 0 ? Math.round(targetQuantity / file.events.length) : targetQuantity;
+                                    const hourlyTarget = Math.round(dailyTarget / HOURS.length) || 1; // Prevent 0
+                                    const overallEff = calculateModelEfficiency(file.events, baseTime);
 
-                        {/* HOURLY SORTIE & EFFECTIFS WRAPPER */}
-                        <div className="flex gap-6 mb-8">
-                            {/* HOURLY SORTIE */}
-                            <div className="flex-1 relative">
-                                <div className="bg-slate-800 text-white font-bold text-center py-2 uppercase tracking-widest text-sm rounded-t-lg">
-                                    Sortie Par Heure & Suivi d'Arrêt
-                                </div>
-                                <table className="w-full border-collapse border border-slate-200 shadow-sm">
-                                    <thead>
-                                        <tr className="bg-slate-50 border-b-2 border-slate-200">
-                                            <th className="py-3 px-2 w-12 text-slate-500"><Clock className="w-4 h-4 mx-auto" /></th>
-                                            <th className="py-3 px-2 text-xs uppercase tracking-wider font-bold text-slate-700 text-left">Heure</th>
-                                            <th className="py-3 px-2 text-xs uppercase tracking-wider font-bold text-indigo-700 text-center w-28">Réalisé</th>
-                                            <th className="py-3 px-2 text-xs uppercase tracking-wider font-bold text-rose-600 text-left print:hidden">Motif d'arrêt (Downtime)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white">
-                                        {HOURS.map((hour, idx) => {
-                                            const hourKey = HOUR_KEYS[idx];
-                                            const val = activeSuivi.sorties[hourKey];
-                                            const isUnderTarget = val !== undefined && val < targetPerHour;
-                                            const isFilled = val !== undefined;
+                                    return (
+                                        <div key={file.planningId} className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden">
 
-                                            return (
-                                                <tr key={hour} className={`transition-colors border-b border-slate-100 ${isUnderTarget ? 'bg-rose-50/30' : 'hover:bg-slate-50'}`}>
-                                                    <td className="py-2.5 px-2 text-center text-slate-400 font-medium text-xs border-r border-slate-100">{idx + 1}</td>
-                                                    <td className="py-2.5 px-2 font-bold text-slate-800 border-r border-slate-100">{hour}</td>
-                                                    <td className="p-0 border-r border-slate-100 relative">
-                                                        <input
-                                                            type="number"
-                                                            className={`w-full h-full min-h-[44px] text-center font-black text-lg outline-none transition-colors ${isUnderTarget ? 'text-rose-600 bg-rose-50/50 focus:bg-rose-100' : 'text-indigo-700 bg-transparent focus:bg-indigo-50'}`}
-                                                            value={val === undefined ? '' : val}
-                                                            onChange={e => handleHourlyChange(hourKey, e.target.value)}
-                                                            placeholder="-"
-                                                        />
-                                                        {isFilled && !isUnderTarget && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />}
-                                                    </td>
-                                                    <td className="p-0 h-full print:hidden bg-slate-50/30">
-                                                        {isUnderTarget ? (
-                                                            <div className="flex items-center h-full px-2 gap-2 h-full min-h-[44px]">
-                                                                <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                                                <select
-                                                                    className="w-full bg-transparent text-xs text-rose-700 font-bold outline-none cursor-pointer"
-                                                                    value={activeSuivi.downtimes?.[hourKey] || ''}
-                                                                    onChange={e => handleDowntimeChange(hourKey, e.target.value)}
-                                                                >
-                                                                    <option value="">-- Raison de perte --</option>
-                                                                    <option value="Panne Machine">Panne Machine</option>
-                                                                    <option value="Manque Fourniture">Manque Fourniture</option>
-                                                                    <option value="Absence Opérateur">Absence Opérateur</option>
-                                                                    <option value="Coupure Courant">Coupure Courant</option>
-                                                                    <option value="Réglage Retardé">Réglage Retardé</option>
-                                                                </select>
+                                            {/* MODEL TOP BAR */}
+                                            <div className="bg-slate-50 border-b border-slate-200 p-3 flex flex-wrap items-center justify-between gap-4">
+                                                <div className="flex items-center flex-wrap gap-4 lg:gap-8">
+                                                    <div>
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Modèle</span>
+                                                        <span className="text-base font-black text-indigo-900 leading-none">{file.model.meta_data.nom_modele}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Tps Base</span>
+                                                        <span className="text-base font-black text-slate-700 leading-none">{baseTime.toFixed(2)}m</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block flex items-center gap-1"><Target className="w-3 h-3" /> Obj. H.</span>
+                                                        <span className="text-base font-black text-indigo-600 leading-none">{hourlyTarget} /h</span>
+                                                    </div>
+
+                                                    <div className="w-px h-8 bg-slate-300 hidden md:block"></div>
+
+                                                    <div>
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total</span>
+                                                        <span className="text-base font-black text-emerald-600 leading-none">{totalProduced} <span className="text-xs text-slate-400">/ {targetQuantity}</span></span>
+                                                    </div>
+
+                                                    {resteProduire > 0 && (
+                                                        <>
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">Reste</span>
+                                                                <span className="text-base font-black text-rose-600 leading-none">{resteProduire}</span>
                                                             </div>
-                                                        ) : (
-                                                            <div className="text-center text-emerald-600 text-[10px] font-bold uppercase tracking-widest pt-3 opacity-50">Objectif Atteint</div>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr className="bg-slate-100 border-t-2 border-slate-300">
-                                            <td colSpan={2} className="py-3 px-4 text-right font-black uppercase text-slate-800">Total Sortie :</td>
-                                            <td className="py-3 text-center text-2xl font-black text-white bg-indigo-600">{activeSuivi.totalHeure}</td>
-                                            <td className="print:hidden bg-slate-200"></td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider block flex items-center gap-1"><Timer className="w-3 h-3" /> ETA</span>
+                                                                <span className="text-base font-black text-amber-600 leading-none">~{hoursLeft}H</span>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
 
-                            {/* RIGHT COLUMN : ENTRER & EFFECTIFS */}
-                            <div className="w-[380px] space-y-6">
-
-                                {/* FLUX STATUS */}
-                                <div className="rounded-xl overflow-hidden shadow-sm border border-slate-200">
-                                    <div className="bg-slate-800 text-white font-bold text-center py-2.5 uppercase tracking-widest text-sm border-b border-slate-700">
-                                        Entrées & En Cours
-                                    </div>
-                                    <table className="w-full border-collapse border-b border-slate-200 bg-white">
-                                        <tbody>
-                                            <tr className="border-b border-slate-100">
-                                                <td className="py-3 px-4 font-bold text-xs uppercase text-slate-600 bg-slate-50 w-1/2 border-r border-slate-100">Lot Entré (Mise en p°)</td>
-                                                <td className="p-0 relative">
-                                                    <input type="number" className="w-full h-full min-h-[44px] text-center font-black text-xl outline-none focus:bg-slate-50 text-slate-800"
-                                                        value={activeSuivi.entrer || ''}
-                                                        onChange={e => handleEntrerChange(e.target.value)} />
-                                                </td>
-                                            </tr>
-                                            <tr className="border-b border-slate-100">
-                                                <td className="py-3 px-4 font-bold text-xs uppercase text-slate-600 bg-slate-50 border-r border-slate-100 text-amber-800 bg-amber-50">En Cour de Chaîne</td>
-                                                <td className="text-center font-black text-3xl text-amber-600 bg-amber-50/50 py-2">{activeSuivi.enCour}</td>
-                                            </tr>
-                                            <tr>
-                                                <td className="py-3 px-4 font-bold text-xs uppercase text-slate-600 bg-slate-50 border-r border-slate-100">Reste Avant Sortie</td>
-                                                <td className="text-center font-black text-xl text-slate-500 py-2">{(activeSuivi.resteEntrer + activeSuivi.entrer) - activeSuivi.totalHeure}</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {/* EFFECTIFS (N.O) */}
-                                <div className="rounded-xl overflow-hidden shadow-sm border border-slate-200">
-                                    <div className="bg-amber-600 text-white font-bold text-center py-2.5 uppercase tracking-widest text-sm border-b border-amber-700 flex items-center justify-center gap-2">
-                                        <Users className="w-4 h-4" /> Effectif (N.O) Direct
-                                    </div>
-                                    <table className="w-full border-collapse bg-white">
-                                        <tbody>
-                                            {['machinistes', 'tracage', 'preparation', 'finition', 'controle'].map((role, i) => (
-                                                <tr key={role} className="border-b border-slate-100 group">
-                                                    <td className="py-2.5 px-4 font-bold text-xs uppercase text-slate-600 bg-slate-50 w-1/2 border-r border-slate-100 flex items-center gap-2">
-                                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                                                        {role === 'tracage' ? 'Traçage/Coupe' : role}
-                                                    </td>
-                                                    <td className="p-0">
-                                                        <input type="number"
-                                                            className="w-full text-center font-bold outline-none py-2 text-slate-800 group-hover:bg-slate-50 transition-colors"
-                                                            value={String(activeSuivi[role as keyof SuiviData] || '')}
-                                                            onChange={e => handleWorkerChange(role, e.target.value)}
-                                                            placeholder="0"
-                                                        />
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                        <tfoot>
-                                            <tr className="bg-amber-100 border-t-2 border-amber-200">
-                                                <td className="py-3 px-4 text-right font-black uppercase tracking-wider text-amber-900 border-r border-amber-200">Total N.O :</td>
-                                                <td className="py-3 text-center text-3xl font-black text-amber-700">{activeSuivi.totalWorkers}</td>
-                                            </tr>
-                                        </tfoot>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* REGISTRE DES DEFAUTS (QC) */}
-                        <div className="mt-8">
-                            <div className="flex items-center justify-between mb-3 border-b-2 border-slate-800 pb-2">
-                                <h3 className="text-xl font-black uppercase text-slate-800 flex items-center gap-2">
-                                    <ShieldAlert className="w-5 h-5 text-rose-600" />
-                                    Registre des Défauts (In-Line QC)
-                                </h3>
-                                <button onClick={addDefect} className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors shadow-sm print:hidden">
-                                    <Plus className="w-3.5 h-3.5" /> Ajouter Défaut
-                                </button>
-                            </div>
-
-                            {(!activeSuivi.defauts || activeSuivi.defauts.length === 0) ? (
-                                <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-6 text-center text-slate-500 font-medium">
-                                    Aucun défaut enregistré pour le moment. La qualité est à 100%.
-                                </div>
-                            ) : (
-                                <table className="w-full border-collapse border border-slate-200 shadow-sm rounded-lg overflow-hidden">
-                                    <thead className="bg-slate-100 border-b-2 border-slate-200 text-left">
-                                        <tr>
-                                            <th className="py-3 px-4 text-xs font-bold uppercase text-slate-600 w-32 border-r border-slate-200">Heure</th>
-                                            <th className="py-3 px-4 text-xs font-bold uppercase text-slate-600 w-48 border-r border-slate-200">Type de Défaut</th>
-                                            <th className="py-3 px-4 text-xs font-bold uppercase text-slate-600 w-32 text-center border-r border-slate-200">Quantité (Pcs)</th>
-                                            <th className="py-3 px-4 text-xs font-bold uppercase text-slate-600">Observation</th>
-                                            <th className="py-3 px-4 w-12 print:hidden"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {activeSuivi.defauts.map((def) => (
-                                            <tr key={def.id} className="border-b border-slate-100 hover:bg-slate-50 group">
-                                                <td className="p-0 border-r border-slate-100">
-                                                    <select
-                                                        className="w-full h-full min-h-[44px] bg-transparent outline-none px-4 text-sm font-bold text-slate-700 cursor-pointer"
-                                                        value={def.hour}
-                                                        onChange={(e) => updateDefect(def.id, 'hour', e.target.value)}
-                                                    >
-                                                        {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-                                                    </select>
-                                                </td>
-                                                <td className="p-0 border-r border-slate-100">
-                                                    <select
-                                                        className="w-full h-full min-h-[44px] bg-transparent outline-none px-4 text-sm font-bold text-rose-700 cursor-pointer"
-                                                        value={def.type}
-                                                        onChange={(e) => updateDefect(def.id, 'type', e.target.value)}
-                                                    >
-                                                        <option value="Couture">Problème Couture (Fil/Aiguille)</option>
-                                                        <option value="Tache">Tache Huile/Saleté</option>
-                                                        <option value="Coupe">Défaut de Coupe</option>
-                                                        <option value="Mesure">Hors Tolérance (Mesure)</option>
-                                                        <option value="Accessoire">Accessoire Manquant/Cassé</option>
-                                                    </select>
-                                                </td>
-                                                <td className="p-0 border-r border-slate-100">
-                                                    <input
-                                                        type="number" min="1"
-                                                        className="w-full h-full min-h-[44px] bg-transparent outline-none px-4 text-center text-lg font-black text-slate-900"
-                                                        value={def.quantity}
-                                                        onChange={(e) => updateDefect(def.id, 'quantity', parseInt(e.target.value) || 0)}
-                                                    />
-                                                </td>
-                                                <td className="p-0">
-                                                    <input
-                                                        type="text"
-                                                        className="w-full h-full min-h-[44px] bg-transparent outline-none px-4 text-sm font-medium text-slate-600"
-                                                        placeholder="Note additionnelle..."
-                                                        value={def.notes}
-                                                        onChange={(e) => updateDefect(def.id, 'notes', e.target.value)}
-                                                    />
-                                                </td>
-                                                <td className="p-2 text-center print:hidden">
-                                                    <button onClick={() => removeDefect(def.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
-                                                        <Trash2 className="w-4 h-4" />
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">MR Moyen</span>
+                                                        <span className={`text-xl font-black ${overallEff >= 80 ? 'text-emerald-500' : overallEff >= 60 ? 'text-amber-500' : 'text-rose-500'}`}>{overallEff}%</span>
+                                                    </div>
+                                                    <button onClick={() => handleExport(file.model)} className="p-2 bg-indigo-50 text-indigo-600 hover:bg-slate-800 hover:text-white rounded-lg transition-colors border border-indigo-100 h-10 w-10 flex items-center justify-center pointer" title="Clôturer le Suivi">
+                                                        <CheckCircle2 className="w-5 h-5" />
                                                     </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
+                                                </div>
+                                            </div>
 
-            {/* KIOSK MODE BARCODE MODAL */}
-            {isKioskMode && (
-                <div className="fixed inset-0 z-[100] bg-slate-900 flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-200 print:hidden">
-                    <button onClick={() => setIsKioskMode(false)} className="absolute top-6 right-6 text-white/50 hover:text-white p-2 bg-white/10 rounded-full transition-all">
-                        ✖ Fermer Kiosque
-                    </button>
+                                            {/* EXCEL-LIKE CLEAN MATRIX */}
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-sm text-center font-medium border-collapse min-w-[1000px]">
+                                                    <thead>
+                                                        <tr className="bg-white border-b border-slate-200">
+                                                            <th className="py-2.5 px-3 border-r border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-wider w-[120px] text-left sticky left-0 bg-white z-10">Date / Jour</th>
 
-                    <div className="text-center mb-12">
-                        <div className="w-24 h-24 bg-indigo-600 rounded-3xl mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-indigo-600/50">
-                            <Barcode className="w-12 h-12 text-white" />
-                        </div>
-                        <h2 className="text-4xl font-black text-white tracking-widest uppercase mb-2">Scanner Faisceau</h2>
-                        <p className="text-indigo-200 text-lg">Préparez la douchette ou entrez le code manuellement.</p>
-                    </div>
+                                                            {/* EFFECTIFS */}
+                                                            <th colSpan={6} className="py-1 px-2 border-r border-slate-200 bg-slate-50">
+                                                                <div className="text-[9px] uppercase font-black text-slate-400 tracking-widest border-b border-slate-200 pb-1 mb-1">Effectifs N.O (Lié)</div>
+                                                                <div className="flex justify-between px-2 w-[260px] mx-auto">
+                                                                    <span className="w-10 text-[10px] font-bold text-slate-600 uppercase" title="Machinistes">Mac</span>
+                                                                    <span className="w-10 text-[10px] font-bold text-slate-600 uppercase" title="Traçage / Coupe">Tra</span>
+                                                                    <span className="w-10 text-[10px] font-bold text-slate-600 uppercase" title="Préparation">Pre</span>
+                                                                    <span className="w-10 text-[10px] font-bold text-slate-600 uppercase" title="Finition">Fin</span>
+                                                                    <span className="w-10 text-[10px] font-bold text-slate-600 uppercase" title="Contrôle">Ctr</span>
+                                                                    <span className="w-10 text-[10px] font-bold text-rose-500 uppercase" title="Absents (Non inclus dans Σ E.)">Abs</span>
+                                                                </div>
+                                                            </th>
+                                                            <th className="py-2.5 px-3 border-r border-slate-200 bg-slate-100 text-slate-600 font-black text-xs w-[60px]" title="Total Effectif">Σ E.</th>
 
-                    <form onSubmit={handleBarcodeSubmit} className="w-full max-w-2xl relative">
-                        <input
-                            type="text"
-                            autoFocus
-                            className="w-full bg-slate-800 border-4 border-slate-700 text-white text-5xl font-black text-center py-8 rounded-3xl outline-none focus:border-indigo-500 transition-all shadow-2xl placeholder:opacity-20"
-                            placeholder="CODE-BARRES..."
-                            value={scannedBarcode}
-                            onChange={(e) => setScannedBarcode(e.target.value)}
-                        />
-                        <button type="submit" className="hidden">Submit</button>
-                    </form>
+                                                            {/* HORAIRES DYNAMIQUES */}
+                                                            {HOURS.map(h => (
+                                                                <th key={h} className="py-2.5 px-1 border-r border-slate-100 text-slate-500 font-bold text-xs w-[56px] bg-white">{h}</th>
+                                                            ))}
 
-                    <div className="h-24 mt-8 flex items-center justify-center">
-                        {scanMessage && (
-                            <div className={`px-8 py-4 rounded-xl text-xl font-bold flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 ${scanMessage.type === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'bg-rose-500/20 text-rose-400 border border-rose-500/50'}`}>
-                                {scanMessage.type === 'success' ? <CheckCircle2 className="w-6 h-6" /> : <ShieldAlert className="w-6 h-6" />}
-                                {scanMessage.text}
+                                                            {/* TOTALS & QC */}
+                                                            <th className="py-2.5 px-3 border-r border-slate-200 bg-emerald-50 text-emerald-800 font-black text-xs w-[60px]" title="Total Pièces">Σ P.</th>
+                                                            <th className="py-2.5 px-2 border-r border-slate-200 bg-rose-50 text-rose-800 font-bold text-[10px] uppercase w-[60px]"><ShieldAlert className="w-3 h-3 mx-auto mb-0.5" /> QC</th>
+                                                            <th className="py-2.5 px-3 border-r border-slate-200 bg-slate-100 text-slate-700 font-black text-xs w-[70px]" title="M.R Journalier">M.R %</th>
+                                                            <th className="w-10 bg-white border-none"></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-200">
+                                                        {file.events.map(s => {
+                                                            const eff = calculateEfficiency(s, baseTime);
+                                                            const effColorBg = eff >= 80 ? 'bg-emerald-500' : eff >= 60 ? 'bg-amber-500' : eff > 0 ? 'bg-rose-500' : 'bg-slate-300';
+
+                                                            return (
+                                                                <tr key={s.id} className="hover:bg-indigo-50/30 transition-colors group">
+
+                                                                    {/* DATE */}
+                                                                    <td className="p-0 border-r border-slate-200 relative sticky left-0 bg-white group-hover:bg-indigo-50/30 z-10 align-middle">
+                                                                        <div className="flex flex-col items-start justify-center h-full px-3 py-1.5 min-h-[46px]">
+                                                                            <span className="text-[10px] font-black uppercase text-slate-700">{getDayName(s.date)}</span>
+                                                                            <input type="date" className="text-[10px] text-slate-400 bg-transparent outline-none m-0 p-0 block leading-none font-bold cursor-pointer" value={s.date} onChange={e => {
+                                                                                setSuivis(prev => prev.map(x => x.id === s.id ? { ...x, date: e.target.value } : x));
+                                                                            }} />
+                                                                        </div>
+                                                                    </td>
+
+                                                                    {/* EFFECTIFS */}
+                                                                    <td className="p-0 border-r border-slate-200" colSpan={6}>
+                                                                        <div className="flex items-center justify-between w-[260px] mx-auto h-full px-2 py-1.5 gap-2">
+                                                                            {['machinistes', 'tracage', 'preparation', 'finition', 'controle'].map(role => (
+                                                                                <input key={role} type="number" min="0" title={role}
+                                                                                    className="w-10 h-8 text-center text-sm font-bold bg-transparent border border-transparent hover:border-slate-300 focus:border-indigo-400 focus:bg-white rounded outline-none transition-all placeholder:text-slate-300"
+                                                                                    value={String(s[role as keyof SuiviData] || '')}
+                                                                                    onChange={e => handleUpdateWorker(s.id, role, e.target.value)}
+                                                                                    placeholder="0"
+                                                                                />
+                                                                            ))}
+                                                                            <input type="number" min="0" title="absents"
+                                                                                className="w-10 h-8 text-center text-sm font-bold bg-rose-50 border border-transparent hover:border-rose-200 focus:border-rose-400 focus:bg-white text-rose-600 rounded outline-none transition-all placeholder:text-rose-300"
+                                                                                value={String(s['absent' as keyof SuiviData] || '')}
+                                                                                onChange={e => handleUpdateWorker(s.id, 'absent', e.target.value)}
+                                                                                placeholder="0"
+                                                                            />
+                                                                        </div>
+                                                                    </td>
+
+                                                                    <td className="p-0 border-r border-slate-200 bg-slate-50/50">
+                                                                        <div className="w-full h-full flex items-center justify-center font-black text-slate-700 text-sm">
+                                                                            {s.totalWorkers > 0 ? s.totalWorkers : '-'}
+                                                                        </div>
+                                                                    </td>
+
+                                                                    {/* HORAIRES CHUNKS */}
+                                                                    {HOURS.map((h, i) => {
+                                                                        const k = HOUR_KEYS[i];
+                                                                        const val = s.sorties[k];
+                                                                        const isFilled = val !== undefined && val >= 0;
+                                                                        const isUnderTarget = isFilled && val < hourlyTarget;
+
+                                                                        return (
+                                                                            <td key={h} className="p-0 border-r border-slate-100 relative align-middle">
+                                                                                <div className="w-full h-full relative group/input p-1">
+                                                                                    <input
+                                                                                        type="number" min="0" step="1"
+                                                                                        className={`w-full h-8 px-1 text-center text-sm font-bold rounded outline-none border border-transparent transition-all placeholder:text-slate-200 ${isFilled ? (isUnderTarget ? 'text-rose-700 bg-rose-50 hover:border-rose-300' : 'text-slate-900 bg-white border-slate-200 hover:border-slate-400') : 'text-slate-400 bg-transparent hover:border-slate-200 focus:bg-white'} ${s.downtimes?.[k] ? 'border-b-2 border-b-rose-400' : ''}`}
+                                                                                        value={val === undefined ? '' : val}
+                                                                                        onChange={e => handleUpdateHourly(s.id, k, e.target.value)}
+                                                                                        placeholder="-"
+                                                                                    />
+                                                                                    {isUnderTarget && (
+                                                                                        <div className="absolute top-1 right-1 opacity-70 pointer-events-none">
+                                                                                            <div className="w-1.5 h-1.5 bg-rose-500 rounded-full"></div>
+                                                                                        </div>
+                                                                                    )}
+
+                                                                                    {/* DOWNTIME TOOLTIP */}
+                                                                                    {isUnderTarget && (
+                                                                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/input:block z-50 min-w-[140px]">
+                                                                                            <input type="text"
+                                                                                                className="w-full text-[10px] p-1.5 border border-rose-300 bg-rose-50 text-rose-800 outline-none rounded shadow-lg placeholder:text-rose-400 font-medium"
+                                                                                                placeholder="Motif (ex: Panne)..."
+                                                                                                value={s.downtimes?.[k] || ''}
+                                                                                                onChange={e => handleDowntimeChange(s.id, k, e.target.value)}
+                                                                                            />
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </td>
+                                                                        )
+                                                                    })}
+
+                                                                    {/* TOTALS */}
+                                                                    <td className="p-0 border-r border-slate-200 bg-emerald-50/50">
+                                                                        <div className="w-full h-full flex items-center justify-center font-black text-emerald-700 text-lg">
+                                                                            {s.totalHeure > 0 ? s.totalHeure : '-'}
+                                                                        </div>
+                                                                    </td>
+
+                                                                    {/* QC */}
+                                                                    <td className="p-0 border-r border-slate-200">
+                                                                        <div className="p-1 h-full w-full">
+                                                                            <input type="number" min="0" title="Retouches / Défauts" // NO negatives
+                                                                                className={`w-full h-8 text-center text-sm font-bold bg-transparent outline-none rounded border border-transparent hover:border-slate-300 focus:bg-white transition-all placeholder:text-slate-200 ${((s.defauts?.reduce((acc, d) => acc + d.quantity, 0) || 0) > 0) ? 'text-rose-600 bg-rose-50 border-rose-200' : 'text-slate-500'}`}
+                                                                                value={s.defauts?.reduce((acc, d) => acc + d.quantity, 0) || ''}
+                                                                                onChange={e => handleDefectChange(s.id, e.target.value)}
+                                                                                placeholder="0"
+                                                                            />
+                                                                        </div>
+                                                                    </td>
+
+                                                                    {/* MR */}
+                                                                    <td className="p-0 border-r border-slate-200">
+                                                                        <div className="p-1 h-full w-full flex items-center justify-center">
+                                                                            <span className={`inline-flex items-center justify-center px-1.5 py-1 min-w-[44px] rounded text-white font-black text-[11px] shadow-sm ${effColorBg}`}>
+                                                                                {eff}%
+                                                                            </span>
+                                                                        </div>
+                                                                    </td>
+
+                                                                    {/* DELETE */}
+                                                                    <td className="p-0 text-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <button onClick={() => handleDeleteSuivi(s.id)} className="p-1 text-slate-300 hover:text-rose-600 rounded">
+                                                                            <Trash2 className="w-4 h-4" />
+                                                                        </button>
+                                                                    </td>
+
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            {/* ADD BTN */}
+                                            <div className="p-2 border-t border-slate-100 bg-slate-50/50 print:hidden text-center sm:text-left">
+                                                <button onClick={() => handleAddDay(file.planningId)} className="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 font-bold text-xs uppercase tracking-wider px-4 py-2 rounded transition-colors hover:bg-slate-100 w-max mx-auto sm:mx-0">
+                                                    <Plus className="w-4 h-4" /> Nouvelle Ligne (Shift)
+                                                </button>
+                                            </div>
+
+                                        </div>
+                                    )
+                                })}
                             </div>
-                        )}
-                    </div>
-
-                    <div className="absolute bottom-8 text-slate-500 text-sm font-bold tracking-widest uppercase">
-                        BeraMethode • MES Execution System
-                    </div>
-                </div>
-            )}
+                        </div>
+                    ))
+                )}
+            </div>
         </div>
     );
 }
-
-// Ensure Trash2 and Plus imports are present. Let's add them via top import line if omitted.
-// I see I already added Plus, Barcode, AlertTriangle, ShieldAlert, BadgeInfo, Play, CheckCircle2.
