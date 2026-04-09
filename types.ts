@@ -138,6 +138,11 @@ export interface Material {
   threadMeters: number;
   threadCapacity: number;
   fournisseur?: string;
+  reference?: string;
+  categorie?: string;
+  stockActuel?: number;
+  stockAlerte?: number;
+  magasinId?: string;
 }
 
 export interface PurchasingData extends Material {

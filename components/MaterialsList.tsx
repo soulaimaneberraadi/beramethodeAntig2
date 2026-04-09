@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Package, Plus, Trash2, Info, Building2, Search } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Package, Plus, Trash2, Info, Building2, Search, Tag, Filter } from 'lucide-react';
 import { Material } from '../types';
 import { fmt } from '../constants';
 
@@ -43,6 +43,33 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
 
     const [magasinData, setMagasinData] = useState<MagasinItem[]>([]);
     const [focusedRow, setFocusedRow] = useState<number | null>(null);
+    const [categoryFilter, setCategoryFilter] = useState<string>('all');
+
+    const CATEGORY_LABELS: Record<string, string> = {
+        'all': 'Tout',
+        'tissu': 'Tissu',
+        'fil': 'Fil',
+        'bouton': 'Bouton',
+        'fermeture': 'Fermeture',
+        'etiquette': 'Étiquette',
+        'emballage': 'Emballage',
+        'autre': 'Autre'
+    };
+
+    const CATEGORY_COLORS: Record<string, string> = {
+        'tissu': 'bg-blue-100 text-blue-700 border-blue-200',
+        'fil': 'bg-purple-100 text-purple-700 border-purple-200',
+        'bouton': 'bg-amber-100 text-amber-700 border-amber-200',
+        'fermeture': 'bg-rose-100 text-rose-700 border-rose-200',
+        'etiquette': 'bg-teal-100 text-teal-700 border-teal-200',
+        'emballage': 'bg-orange-100 text-orange-700 border-orange-200',
+        'autre': 'bg-slate-100 text-slate-700 border-slate-200'
+    };
+
+    const availableCategories = useMemo(() => {
+        const cats = new Set(magasinData.map(m => m.categorie || 'autre'));
+        return ['all', ...Array.from(cats)];
+    }, [magasinData]);
 
     // --- QUICK ADD TO MAGASIN STATE ---
     const [showQuickAddModal, setShowQuickAddModal] = useState(false);
@@ -177,8 +204,11 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
                                     ? magasinData.filter(m => {
                                         const searchName = (m.nom || m.designation || '').toLowerCase();
                                         const searchRef = (m.reference || '').toLowerCase();
+                                        const searchCat = (m.categorie || '').toLowerCase();
                                         const query = (item.name || '').toLowerCase();
-                                        return searchName.includes(query) || searchRef.includes(query);
+                                        const matchesText = searchName.includes(query) || searchRef.includes(query) || searchCat.includes(query);
+                                        const matchesCategory = categoryFilter === 'all' || m.categorie === categoryFilter;
+                                        return matchesText && matchesCategory;
                                     })
                                     : [];
 
@@ -198,47 +228,113 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
                                                 <Search className="w-3 h-3 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
                                             </div>
 
-                                            {item.fournisseur && (
+                                            {/* SELECTED MATERIAL INFO CARD */}
+                                            {item.magasinId && (item.fournisseur || item.reference || item.categorie) && focusedRow !== item.id && (
+                                                <div className="mt-2 p-2 rounded-lg bg-slate-50 border border-slate-100 animate-in fade-in slide-in-from-top-1 space-y-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        {item.reference && (
+                                                            <span className="text-[10px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                                                                {item.reference}
+                                                            </span>
+                                                        )}
+                                                        {item.categorie && (
+                                                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${CATEGORY_COLORS[item.categorie] || CATEGORY_COLORS['autre']}`}>
+                                                                <Tag className="w-2.5 h-2.5 inline mr-0.5" />
+                                                                {CATEGORY_LABELS[item.categorie] || item.categorie}
+                                                            </span>
+                                                        )}
+                                                        {item.fournisseur && (
+                                                            <span className="text-[10px] text-blue-600 font-bold flex items-center gap-1">
+                                                                <Building2 className="w-3 h-3" /> {item.fournisseur}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {item.stockActuel !== undefined && (
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                                                (item.stockActuel || 0) === 0 ? 'bg-red-100 text-red-700' :
+                                                                (item.stockActuel || 0) <= (item.stockAlerte || 0) ? 'bg-amber-100 text-amber-700' :
+                                                                'bg-emerald-100 text-emerald-700'
+                                                            }`}>
+                                                                Stock: {item.stockActuel} {item.unit}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {item.fournisseur && !item.magasinId && (
                                                 <div className="text-[10px] text-blue-600 mt-1.5 flex items-center gap-1 font-bold animate-in fade-in slide-in-from-top-1">
                                                     <Building2 className="w-3 h-3" /> {item.fournisseur}
                                                 </div>
                                             )}
 
-                                            {/* AUTOCOMPLETE DROPDOWN */}
-                                            {focusedRow === item.id && (filteredMagasin.length > 0 || (item.name && filteredMagasin.length === 0)) && (
-                                                <div className="absolute z-[100] left-3 right-3 top-[44px] bg-white border border-slate-200 rounded-lg shadow-xl max-h-56 overflow-y-auto animate-in fade-in slide-in-from-top-1 flex flex-col">
+                                            {/* ADVANCED AUTOCOMPLETE DROPDOWN */}
+                                            {focusedRow === item.id && (filteredMagasin.length > 0 || (item.name && filteredMagasin.length === 0) || categoryFilter !== 'all') && (
+                                                <div className="absolute z-[100] left-3 right-3 top-[44px] bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-hidden animate-in fade-in slide-in-from-top-1 flex flex-col">
+                                                    {/* CATEGORY FILTER TABS */}
+                                                    <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-slate-100 bg-slate-50/80 flex-wrap">
+                                                        <Filter className="w-3 h-3 text-slate-400 mr-0.5" />
+                                                        {availableCategories.map(cat => (
+                                                            <button
+                                                                key={cat}
+                                                                onMouseDown={(e) => {
+                                                                    e.preventDefault();
+                                                                    setCategoryFilter(cat);
+                                                                }}
+                                                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${
+                                                                    categoryFilter === cat
+                                                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                                                        : cat === 'all'
+                                                                            ? 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                                                                            : `${CATEGORY_COLORS[cat] || 'bg-slate-100 text-slate-600 border-slate-200'} hover:opacity-80`
+                                                                }`}
+                                                            >
+                                                                {CATEGORY_LABELS[cat] || cat}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+
+                                                    {/* RESULTS LIST */}
+                                                    <div className="overflow-y-auto max-h-60">
                                                     {filteredMagasin.length > 0 ? (
                                                         filteredMagasin.map(m => {
                                                             const stock = m.stockActuel || 0;
                                                             const alerte = m.stockAlerte || 0;
-                                                            const price = m.prixUnitaire || m.prix || 0;
+                                                            const price = m.prixUnitaire || (m as any).prix || 0;
                                                             const isDanger = stock <= alerte;
                                                             const isZero = stock === 0;
+                                                            const catColor = CATEGORY_COLORS[m.categorie || 'autre'] || CATEGORY_COLORS['autre'];
 
                                                             return (
                                                                 <div
                                                                     key={m.id}
-                                                                    className={`p-3 border-b border-slate-50 cursor-pointer hover:bg-slate-50 flex flex-col transition ${isZero ? 'opacity-70' : ''}`}
+                                                                    className={`p-3 border-b border-slate-50 cursor-pointer hover:bg-indigo-50/50 flex flex-col transition ${isZero ? 'opacity-60' : ''}`}
                                                                     onMouseDown={(e) => {
                                                                         e.preventDefault();
-                                                                        updateMaterial(item.id, 'IMPORT_MAGASIN', { ...m, prix: price }); // pass normalized price
+                                                                        updateMaterial(item.id, 'IMPORT_MAGASIN', { ...m, prix: price });
                                                                         setFocusedRow(null);
+                                                                        setCategoryFilter('all');
                                                                     }}
                                                                 >
                                                                     <div className="flex justify-between items-start">
                                                                         <div className="flex flex-col">
                                                                             <span className={`font-bold text-sm ${isZero ? 'text-red-600 line-through' : 'text-slate-800'}`}>{m.nom || m.designation}</span>
-                                                                            <span className="text-[10px] text-slate-400 font-mono mt-0.5">{m.reference || 'Aucune Réf'}</span>
+                                                                            <div className="flex items-center gap-2 mt-1">
+                                                                                <span className="text-[10px] text-slate-400 font-mono">{m.reference || 'Aucune Réf'}</span>
+                                                                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${catColor}`}>
+                                                                                    {CATEGORY_LABELS[m.categorie || 'autre'] || m.categorie}
+                                                                                </span>
+                                                                            </div>
                                                                         </div>
-                                                                        <div className="flex flex-col items-end">
-                                                                            <span className="font-bold text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded mb-1">{price.toFixed(2)} {currency} / {m.unite || 'pc'}</span>
+                                                                        <div className="flex flex-col items-end gap-1">
+                                                                            <span className="font-bold text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{price.toFixed(2)} {currency} / {m.unite || 'pc'}</span>
                                                                             <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${isZero ? 'bg-red-100 text-red-700' : isDanger ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                                                                 Stock: {stock} {m.unite}
                                                                             </span>
                                                                         </div>
                                                                     </div>
                                                                     {m.fournisseur && (
-                                                                        <span className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1">
+                                                                        <span className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1.5">
                                                                             <Building2 className="w-3 h-3" /> {m.fournisseur}
                                                                         </span>
                                                                     )}
@@ -246,9 +342,9 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
                                                             );
                                                         })
                                                     ) : (
-                                                        <div className="p-3">
+                                                        <div className="p-4">
                                                             <div className="text-xs text-slate-500 text-center italic mb-3">
-                                                                Aucune matière trouvée pour "{item.name}"
+                                                                Aucune matière trouvée {item.name ? `pour "${item.name}"` : ''} {categoryFilter !== 'all' ? `dans la catégorie "${CATEGORY_LABELS[categoryFilter]}"` : ''}
                                                             </div>
                                                             {item.name && item.name.length > 1 && (
                                                                 <button
@@ -258,6 +354,7 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
                                                                         setQuickAddForm({ ...quickAddForm, nom: item.name });
                                                                         setShowQuickAddModal(true);
                                                                         setFocusedRow(null);
+                                                                        setCategoryFilter('all');
                                                                     }}
                                                                     className="w-full py-2 bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold text-xs rounded-lg hover:bg-indigo-100 hover:border-indigo-200 transition-colors flex items-center justify-center gap-2"
                                                                 >
@@ -266,6 +363,7 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
                                                             )}
                                                         </div>
                                                     )}
+                                                    </div>
                                                 </div>
                                             )}
                                         </td>

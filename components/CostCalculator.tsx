@@ -219,10 +219,15 @@ export default function CostCalculator({
             // Special check if we are importing from Magasin (which passes an object)
             if (field === 'IMPORT_MAGASIN' && typeof value === 'object') {
                 const mItem = value as any;
-                updatedItem.name = mItem.nom || '';
+                updatedItem.name = mItem.nom || mItem.designation || '';
                 updatedItem.unitPrice = Number(mItem.prix) || 0;
                 updatedItem.unit = mItem.unite || 'pc';
-                updatedItem.fournisseur = mItem.fournisseur || '';
+                updatedItem.fournisseur = mItem.fournisseur || mItem.fournisseurNom || '';
+                updatedItem.reference = mItem.reference || '';
+                updatedItem.categorie = mItem.categorie || '';
+                updatedItem.stockActuel = Number(mItem.stockActuel) || 0;
+                updatedItem.stockAlerte = Number(mItem.stockAlerte) || 0;
+                updatedItem.magasinId = mItem.id || '';
 
                 if (updatedItem.unit === 'bobine') {
                     updatedItem.threadCapacity = 5000;
