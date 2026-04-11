@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import { register, login, logout, me, requestPasswordReset, verifyResetCode, resetPassword } from './server/authController';
 import { getAllUsers, updateUserRole, deleteUser, isAdmin, makeMeAdmin } from './server/userController';
 import { getModels, saveModel, deleteModel } from './server/modelController';
@@ -39,14 +39,14 @@ async function startServer() {
   app.put('/api/users/:id/role', isAdmin, updateUserRole);
   app.delete('/api/users/:id', isAdmin, deleteUser);
 
-  // AI Analysis Route — Claude Opus 4.6
+  // AI Analysis Route — Gemini 2.0 Flash
   app.post('/api/ai/analyze-stock', async (req, res) => {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.API_KEY;
     if (!apiKey) {
-      return res.status(503).json({ error: 'ANTHROPIC_API_KEY non configurée dans le fichier .env' });
+      return res.status(503).json({ error: 'API_KEY (Gemini) non configurée dans le fichier .env' });
     }
 
-    const { materials, stockData, orderQty, currency, modelName } = req.body;
+    const { materials, orderQty, currency, modelName } = req.body;
 
     const materialsText = (materials || []).map((m: any) => {
       const needed = (m.qty || 0) * (orderQty || 1);
@@ -74,20 +74,16 @@ MISSION — Analyse complète et décisions intelligentes:
 Réponds en français, de façon structurée avec des sections claires. Sois direct et actionnable.`;
 
     try {
-      const client = new Anthropic({ apiKey });
-      const message = await client.messages.create({
-        model: 'claude-opus-4-6',
-        max_tokens: 2048,
-        thinking: { type: 'adaptive' },
-        messages: [{ role: 'user', content: prompt }],
+      const client = new GoogleGenAI({ apiKey });
+      const response = await client.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: prompt,
+        config: { temperature: 0.3 },
       });
-
-      const textBlock = message.content.find((b: any) => b.type === 'text');
-      const analysis = textBlock && 'text' in textBlock ? textBlock.text : 'Analyse non disponible.';
-      return res.json({ analysis });
+      return res.json({ analysis: response.text || 'Analyse non disponible.' });
     } catch (err: any) {
-      console.error('Claude API Error:', err);
-      return res.status(500).json({ error: err.message || 'Erreur Claude API' });
+      console.error('Gemini AI Error:', err);
+      return res.status(500).json({ error: err.message || 'Erreur Gemini API' });
     }
   });
 

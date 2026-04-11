@@ -85,7 +85,7 @@ export default function AIAnalysisPanel({ materials, orderQty, currency, modelNa
       >
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-indigo-500" />
-          <span className="font-bold text-indigo-700 text-sm">Analyse AI — Claude Opus 4.6</span>
+          <span className="font-bold text-indigo-700 text-sm">Analyse AI — Gemini 2.0 Flash</span>
           {analysis && !loading && (
             <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded-full">Prêt</span>
           )}
@@ -112,7 +112,7 @@ export default function AIAnalysisPanel({ materials, orderQty, currency, modelNa
           {loading && (
             <div className="flex items-center gap-3 text-indigo-600 py-6 justify-center">
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span className="text-sm font-medium">Claude analyse votre stock et vos coûts...</span>
+              <span className="text-sm font-medium">Gemini analyse votre stock et vos coûts...</span>
             </div>
           )}
 
@@ -122,9 +122,9 @@ export default function AIAnalysisPanel({ materials, orderQty, currency, modelNa
               <div>
                 <div className="text-xs font-bold text-rose-700 mb-0.5">Erreur</div>
                 <div className="text-xs text-rose-600">{error}</div>
-                {error.includes('ANTHROPIC_API_KEY') && (
+                {error.includes('API_KEY') && (
                   <div className="mt-2 text-xs text-rose-500">
-                    Ajoutez <code className="bg-rose-100 px-1 rounded">ANTHROPIC_API_KEY=sk-ant-...</code> dans votre fichier <code className="bg-rose-100 px-1 rounded">.env</code>
+                    Ajoutez <code className="bg-rose-100 px-1 rounded">API_KEY=votre_cle_gemini</code> dans votre fichier <code className="bg-rose-100 px-1 rounded">.env</code>
                   </div>
                 )}
               </div>
@@ -151,7 +151,7 @@ export default function AIAnalysisPanel({ materials, orderQty, currency, modelNa
             <div className="text-center py-6 text-slate-400 text-sm">
               <Sparkles className="w-8 h-8 mx-auto mb-2 text-indigo-200" />
               <p>Cliquez sur <strong>"Analyser maintenant"</strong> pour obtenir des recommandations intelligentes.</p>
-              <p className="text-xs mt-1 text-slate-300">Alimenté par Claude Opus 4.6 — Anthropic</p>
+              <p className="text-xs mt-1 text-slate-300">Alimenté par Gemini 2.0 Flash — Google</p>
             </div>
           )}
         </div>
