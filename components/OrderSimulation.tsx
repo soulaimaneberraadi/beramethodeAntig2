@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ShoppingCart, Percent, Banknote, Clock, Package, TrendingUp, Info, AlertTriangle, CheckCircle, Truck, RefreshCw, X, ArrowRight } from 'lucide-react';
 import { PurchasingData } from '../types';
 import { fmt } from '../constants';
+import AIAnalysisPanel from './AIAnalysisPanel';
 
 interface MagasinStockItem {
     id: string;
@@ -488,6 +489,22 @@ const OrderSimulation: React.FC<OrderSimulationProps> = ({
                         Confirmer Commandes & Déduire Stock
                     </button>
                 </div>
+
+                {/* Claude AI Analysis Panel */}
+                <AIAnalysisPanel
+                    materials={purchasingData.map(m => ({
+                        name: m.name,
+                        categorie: (m as any).categorie,
+                        unitPrice: m.unitPrice,
+                        qty: m.qty,
+                        unit: m.unit,
+                        stockActuel: (m as any).stockActuel,
+                        fournisseur: (m as any).fournisseur,
+                        delaiLivraison: (m as any).delaiLivraison,
+                    }))}
+                    orderQty={orderQty}
+                    currency={currency}
+                />
             </div>
         </div >
     );
