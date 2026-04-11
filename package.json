@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "*",
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@google/genai": "^1.41.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
