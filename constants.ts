@@ -1,6 +1,9 @@
 import { Translations } from './types';
 
-export const fmt = (n: number) => parseFloat(n.toFixed(1)).toString();
+export const fmt = (n: number) => {
+  if (!isFinite(n) || isNaN(n)) return '0';
+  return parseFloat(n.toFixed(1)).toString();
+};
 
 export const translations: Translations = {
   dr: { // Darija

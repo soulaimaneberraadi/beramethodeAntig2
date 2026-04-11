@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Package, Plus, Trash2, Info, Building2, Search, Tag, Filter } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Package, Plus, Trash2, Info, Building2, Search, Tag, Filter, X, Save, Edit2 } from 'lucide-react';
 import { Material } from '../types';
 import { fmt } from '../constants';
 
@@ -31,6 +31,11 @@ interface MagasinItem {
     unite?: string;
     categorie?: string;
     fournisseur?: string;
+    fournisseurNom?: string;
+    fournisseurTel?: string;
+    delaiLivraison?: number;
+    photo?: string;
+    emplacement?: string;
 }
 
 const MaterialsList: React.FC<MaterialsListProps> = ({
@@ -73,36 +78,59 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
 
     // --- QUICK ADD TO MAGASIN STATE ---
     const [showQuickAddModal, setShowQuickAddModal] = useState(false);
-    const [quickAddForm, setQuickAddForm] = useState<Partial<MagasinItem>>({ unite: 'm', categorie: 'tissu' });
+    const [quickAddForm, setQuickAddForm] = useState<Partial<MagasinItem>>({
+        unite: 'm', categorie: 'tissu', reference: `REF-${Math.floor(Math.random() * 9000) + 1000}`
+    });
     const [quickAddTargetRow, setQuickAddTargetRow] = useState<number | null>(null);
+    const photoInputRef = useRef<HTMLInputElement>(null);
+
+    const CATS = ['tissu', 'fil', 'bouton', 'fermeture', 'etiquette', 'emballage', 'autre'] as const;
+    const UNITS = ['m', 'kg', 'piece', 'cone', 'boite', 'rouleau'] as const;
 
     const handleQuickAdd = () => {
         if (!quickAddForm.nom) return;
         const newItem: MagasinItem = {
             id: Date.now().toString(),
             nom: quickAddForm.nom,
-            designation: quickAddForm.nom, // keep in sync with Magasin.tsx structure
+            designation: quickAddForm.nom,
             reference: quickAddForm.reference || `REF-${Math.floor(Math.random() * 10000)}`,
             prixUnitaire: Number(quickAddForm.prixUnitaire) || 0,
             stockActuel: Number(quickAddForm.stockActuel) || 0,
             stockAlerte: Number(quickAddForm.stockAlerte) || 10,
             unite: quickAddForm.unite || 'm',
-            categorie: quickAddForm.categorie as any
+            categorie: quickAddForm.categorie as any,
+            fournisseurNom: quickAddForm.fournisseurNom || '',
+            fournisseurTel: quickAddForm.fournisseurTel || '',
+            photo: quickAddForm.photo || '',
+            emplacement: quickAddForm.emplacement || '',
+            delaiLivraison: Number(quickAddForm.delaiLivraison) || 0,
         };
 
-        // Save to original array
+        // Save to magasin (auto-sync to Base Produit)
         const updatedMagasin = [newItem, ...magasinData];
         setMagasinData(updatedMagasin);
         localStorage.setItem('beramethode_magasin', JSON.stringify(updatedMagasin));
 
+        // Also sync to beramethode_products for Base Produit compatibility
+        try {
+            const existing = JSON.parse(localStorage.getItem('beramethode_products') || '[]');
+            const productEntry = {
+                id: newItem.id, reference: newItem.reference, designation: newItem.nom,
+                categorie: newItem.categorie, unite: newItem.unite, prixUnitaire: newItem.prixUnitaire,
+                stockAlerte: newItem.stockAlerte, photo: newItem.photo, emplacement: newItem.emplacement,
+                fournisseurNom: newItem.fournisseurNom, fournisseurTel: newItem.fournisseurTel,
+            };
+            localStorage.setItem('beramethode_products', JSON.stringify([productEntry, ...existing]));
+        } catch (e) { /* ignore */ }
+
         // Update current row in Cost Calculator
         if (quickAddTargetRow !== null) {
-            updateMaterial(quickAddTargetRow, 'IMPORT_MAGASIN', { ...newItem, prix: newItem.prixUnitaire });
+            updateMaterial(quickAddTargetRow, 'IMPORT_MAGASIN', { ...newItem, prix: newItem.prixUnitaire, fournisseur: newItem.fournisseurNom });
         }
 
         // Close and reset
         setShowQuickAddModal(false);
-        setQuickAddForm({ unite: 'm', categorie: 'tissu' });
+        setQuickAddForm({ unite: 'm', categorie: 'tissu', reference: `REF-${Math.floor(Math.random() * 9000) + 1000}` });
         setQuickAddTargetRow(null);
     };
 
@@ -119,53 +147,107 @@ const MaterialsList: React.FC<MaterialsListProps> = ({
 
     return (
         <>
-            {/* QUICK ADD MODAL */}
+            {/* QUICK ADD MODAL — Matches Base Produit (Magasin.tsx ProductModal) design */}
             {showQuickAddModal && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between mb-6">
-                            <h3 className="font-black text-slate-800 text-lg flex items-center gap-2">
-                                <Plus className="w-5 h-5 text-indigo-500" /> Ajouter au Magasin
-                            </h3>
-                            <button onClick={() => setShowQuickAddModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
-                                <Trash2 className="w-4 h-4" /> {/* Or an X icon, but keeping imports minimal */}
+                <div className="fixed inset-0 z-[200] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                            <h2 className="font-black text-slate-800 text-lg flex items-center gap-2">
+                                <Plus className="w-5 h-5 text-emerald-500" /> Nouvel Article
+                            </h2>
+                            <button onClick={() => setShowQuickAddModal(false)} className="p-2 hover:bg-rose-50 rounded-full transition-colors text-slate-400 hover:text-rose-500">
+                                <X className="w-5 h-5" />
                             </button>
                         </div>
 
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Désignation / Nom</label>
-                                <input type="text" value={quickAddForm.nom || ''} onChange={(e) => setQuickAddForm({ ...quickAddForm, nom: e.target.value })} className={`${inputStyle} font-bold`} />
+                        <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+                            {/* Photo + Basic info */}
+                            <div className="flex gap-5">
+                                <div
+                                    onClick={() => photoInputRef.current?.click()}
+                                    className="w-24 h-24 rounded-2xl border-2 border-dashed border-slate-200 hover:border-indigo-400 bg-slate-50 flex items-center justify-center cursor-pointer overflow-hidden shrink-0 transition-colors"
+                                >
+                                    {quickAddForm.photo
+                                        ? <img src={quickAddForm.photo} className="w-full h-full object-cover" alt="" />
+                                        : <span className="text-xs font-bold text-slate-400">Photo</span>
+                                    }
+                                </div>
+                                <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+                                    const file = e.target.files?.[0]; if (!file) return;
+                                    const r = new FileReader();
+                                    r.onload = ev => setQuickAddForm(prev => ({ ...prev, photo: ev.target?.result as string }));
+                                    r.readAsDataURL(file);
+                                }} />
+                                <div className="flex-1 grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Référence (Code-barres)</label>
+                                        <input className={inputStyle} value={quickAddForm.reference || ''} onChange={e => setQuickAddForm({ ...quickAddForm, reference: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Désignation *</label>
+                                        <input className={`${inputStyle} font-bold`} placeholder="Ex: Fil Coton Noir..." value={quickAddForm.nom || ''} onChange={e => setQuickAddForm({ ...quickAddForm, nom: e.target.value })} autoFocus />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Catégorie</label>
+                                        <select className={inputStyle} value={quickAddForm.categorie || 'tissu'} onChange={e => setQuickAddForm({ ...quickAddForm, categorie: e.target.value })}>
+                                            {CATS.map(c => <option key={c} value={c} className="capitalize">{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Unité</label>
+                                        <select className={inputStyle} value={quickAddForm.unite || 'm'} onChange={e => setQuickAddForm({ ...quickAddForm, unite: e.target.value })}>
+                                            {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Catégorie</label>
-                                    <select value={quickAddForm.categorie || 'tissu'} onChange={(e) => setQuickAddForm({ ...quickAddForm, categorie: e.target.value })} className={inputStyle}>
-                                        {['tissu', 'fil', 'bouton', 'fermeture', 'etiquette', 'emballage', 'autre'].map(c => <option key={c} value={c}>{c}</option>)}
-                                    </select>
+
+                            {/* Pricing & Stock */}
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Prix u. ({currency})</label>
+                                    <input className={`${inputStyle} text-indigo-700 font-black`} type="number" min="0" step="0.01" value={quickAddForm.prixUnitaire || ''} onChange={e => setQuickAddForm({ ...quickAddForm, prixUnitaire: Math.max(0, Number(e.target.value)) })} />
                                 </div>
-                                <div className="w-1/3">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Unité</label>
-                                    <select value={quickAddForm.unite || 'm'} onChange={(e) => setQuickAddForm({ ...quickAddForm, unite: e.target.value })} className={inputStyle}>
-                                        {['m', 'kg', 'piece', 'cone', 'boite'].map(c => <option key={c} value={c}>{c}</option>)}
-                                    </select>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Stock Initial</label>
+                                    <input className={inputStyle} type="number" min="0" value={quickAddForm.stockActuel || ''} onChange={e => setQuickAddForm({ ...quickAddForm, stockActuel: Math.max(0, Number(e.target.value)) })} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Seuil de réappro.</label>
+                                    <input className={inputStyle} type="number" min="0" value={quickAddForm.stockAlerte || ''} onChange={e => setQuickAddForm({ ...quickAddForm, stockAlerte: Math.max(0, Number(e.target.value)) })} />
                                 </div>
                             </div>
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Prix U. ({currency})</label>
-                                    <input type="number" min="0" step="0.01" value={quickAddForm.prixUnitaire || ''} onChange={(e) => setQuickAddForm({ ...quickAddForm, prixUnitaire: Number(e.target.value) })} className={`${inputStyle} text-indigo-700 font-black`} />
+
+                            {/* Supplier Section */}
+                            <div className="border border-slate-100 bg-slate-50 rounded-2xl p-4">
+                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Fournisseur Privilégié</label>
+                                        <input className={inputStyle} placeholder="Entreprise..." value={quickAddForm.fournisseurNom || ''} onChange={e => setQuickAddForm({ ...quickAddForm, fournisseurNom: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Téléphone Frs.</label>
+                                        <input className={inputStyle} placeholder="+212..." value={quickAddForm.fournisseurTel || ''} onChange={e => setQuickAddForm({ ...quickAddForm, fournisseurTel: e.target.value })} />
+                                    </div>
                                 </div>
-                                <div className="flex-1">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stock Initial</label>
-                                    <input type="number" min="0" value={quickAddForm.stockActuel || ''} onChange={(e) => setQuickAddForm({ ...quickAddForm, stockActuel: Number(e.target.value) })} className={inputStyle} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Emplacement physique</label>
+                                        <input className={inputStyle} placeholder="Rayon A, Étagère 3..." value={quickAddForm.emplacement || ''} onChange={e => setQuickAddForm({ ...quickAddForm, emplacement: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Délai livraison (jours)</label>
+                                        <input className={inputStyle} type="number" min="0" placeholder="Ex: 7" value={quickAddForm.delaiLivraison || ''} onChange={e => setQuickAddForm({ ...quickAddForm, delaiLivraison: Math.max(0, Number(e.target.value)) })} />
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="mt-8 flex justify-end gap-3">
-                            <button onClick={() => setShowQuickAddModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Annuler</button>
-                            <button onClick={handleQuickAdd} className="px-6 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-md transition-colors">Enregistrer</button>
+                        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+                            <button onClick={() => setShowQuickAddModal(false)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Annuler</button>
+                            <button onClick={handleQuickAdd} className="px-6 py-2 text-sm font-black bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 flex items-center gap-2 shadow-md">
+                                <Save className="w-4 h-4" /> Enregistrer
+                            </button>
                         </div>
                     </div>
                 </div>

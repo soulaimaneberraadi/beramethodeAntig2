@@ -29,6 +29,7 @@ export interface MagasinProduct {
     prixUnitaire: number;
     cump?: number; // Coût Unitaire Moyen Pondéré
     stockAlerte: number;
+    delaiLivraison?: number; // Lead time in days from supplier
 }
 
 export interface LotStock {
@@ -261,6 +262,7 @@ export default function Magasin({ models = [], planningEvents = [] }: MagasinPro
     const [catFilter, setCatFilter] = useState('all');
     const [prodModal, setProdModal] = useState<{ open: boolean; item?: MagasinProduct }>({ open: false });
     const [bcModal, setBcModal] = useState<{ open: boolean; item?: BonCommande }>({ open: false });
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; product: MagasinProduct } | null>(null);
     const [aiEnabled, setAiEnabled] = useState(() => ld('mg_ai', false));
     const [invSession, setInvSession] = useState<{ id: string, items: { pid: string, qty: string }[] } | null>(null);
     const [traceQuery, setTraceQuery] = useState('');
@@ -733,7 +735,8 @@ export default function Magasin({ models = [], planningEvents = [] }: MagasinPro
                             {filtered.map(p => {
                                 const st = stockQty(lots, p.id);
                                 return (
-                                    <div key={p.id} className="bg-white rounded-2xl border shadow-sm p-4 hover:shadow-md transition-shadow relative overflow-hidden">
+                                    <div key={p.id} className="bg-white rounded-2xl border shadow-sm p-4 hover:shadow-md transition-shadow relative overflow-hidden"
+                                        onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, product: p }); }}>
                                         <div className={`absolute top-0 inset-x-0 h-1 ${st === 0 ? 'bg-red-500' : st <= p.stockAlerte ? 'bg-amber-400' : 'bg-emerald-400'}`} />
                                         <div className="flex gap-4">
                                             <div className="w-16 h-16 bg-slate-100 rounded-xl overflow-hidden shrink-0" onClick={() => setProdModal({ open: true, item: p })}>{p.photo ? <img src={p.photo} className="w-full h-full object-cover" /> : <Package className="w-8 h-8 m-4 text-slate-300" />}</div>
@@ -780,10 +783,14 @@ export default function Magasin({ models = [], planningEvents = [] }: MagasinPro
 
                                         <div className="mt-4 flex items-center justify-between border-t pt-3">
                                             <div><div className="text-[10px] text-slate-400 font-bold uppercase">Stock Réel</div><div className="font-black text-xl">{st.toFixed(1)} <span className="text-sm font-medium">{p.unite}</span></div></div>
-                                            <div className="flex gap-1">
-                                                <button onClick={() => printBarcode(p.reference, p.designation)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg"><Barcode className="w-4 h-4" /></button>
-                                                <button onClick={() => { setTab('bureau'); setBPid(p.id); setBMode('entree'); }} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg"><TrendingDown className="w-4 h-4" /></button>
-                                                <button onClick={() => { setTab('bureau'); setBPid(p.id); setBMode('sortie'); }} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg"><TrendingUp className="w-4 h-4" /></button>
+                                            <div className="flex gap-1.5">
+                                                <button onClick={() => printBarcode(p.reference, p.designation)} title="Imprimer code-barres" className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg"><Barcode className="w-4 h-4" /></button>
+                                                <button onClick={() => { setTab('bureau'); setBPid(p.id); setBMode('entree'); }} className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5">
+                                                    <ArrowDownCircle className="w-3.5 h-3.5" /> Entrée
+                                                </button>
+                                                <button onClick={() => { setTab('bureau'); setBPid(p.id); setBMode('sortie'); }} className="px-3 py-1.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-lg hover:bg-rose-100 transition-colors flex items-center gap-1.5">
+                                                    <ArrowUpCircle className="w-3.5 h-3.5" /> Sortie
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
@@ -823,7 +830,7 @@ export default function Magasin({ models = [], planningEvents = [] }: MagasinPro
                                                     {bureauProduct.emplacement && <div className="bg-slate-100 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold flex gap-2"><MapPin className="w-4 h-4" /> À prendre au : {bureauProduct.emplacement}</div>}
 
                                                     <div className="flex gap-4">
-                                                        <div className="flex-1"><Lbl t={bMode === 'regularisation' ? 'Quantité Réelle Constatée' : `Quantité (${bureauProduct.unite})`} /><input className={inp + ' text-xl font-black'} type="number" value={bQty} onChange={e => setBQty(e.target.value)} autoFocus />
+                                                        <div className="flex-1"><Lbl t={bMode === 'regularisation' ? 'Quantité Réelle Constatée' : `Quantité (${bureauProduct.unite})`} /><input className={inp + ' text-xl font-black'} type="number" min="0" value={bQty} onChange={e => setBQty(Math.max(0, parseFloat(e.target.value) || 0).toString())} autoFocus />
                                                             {bMode !== 'regularisation' && <div className="flex gap-1 mt-1">{[10, 50, 100].map(q => <button key={q} onClick={() => setBQty(q.toString())} className="px-2 py-1 text-xs border rounded hover:bg-slate-50 font-bold">+{q}</button>)}</div>}
                                                         </div>
                                                         {bMode === 'entree' && <div className="w-1/3"><Lbl t="N° Bain/Lot (Teinture)" /><input className={inp} placeholder="TEIN-..." value={bNumBain} onChange={e => setBNumBain(e.target.value)} /></div>}
@@ -1433,6 +1440,51 @@ export default function Magasin({ models = [], planningEvents = [] }: MagasinPro
                 })()}
 
             </div>
+
+            {/* RIGHT-CLICK CONTEXT MENU */}
+            {contextMenu && (
+                <>
+                    <div className="fixed inset-0 z-[90]" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+                    <div
+                        className="fixed z-[100] bg-white rounded-xl shadow-2xl border border-slate-200 py-1.5 min-w-[200px] animate-in fade-in zoom-in-95 duration-100"
+                        style={{ top: contextMenu.y, left: contextMenu.x }}
+                    >
+                        <div className="px-3 py-2 border-b border-slate-100">
+                            <span className="text-xs font-black text-slate-800 truncate block">{contextMenu.product.designation}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">{contextMenu.product.reference}</span>
+                        </div>
+                        <button
+                            onClick={() => { setProdModal({ open: true, item: contextMenu.product }); setContextMenu(null); }}
+                            className="w-full px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2 transition-colors"
+                        >
+                            <Edit2 className="w-4 h-4" /> Modifier
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (confirm(`Supprimer "${contextMenu.product.designation}" ?`)) {
+                                    setProducts(prev => prev.filter(x => x.id !== contextMenu.product.id));
+                                    setLots(prev => prev.filter(x => x.productId !== contextMenu.product.id));
+                                }
+                                setContextMenu(null);
+                            }}
+                            className="w-full px-3 py-2 text-left text-sm font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 transition-colors"
+                        >
+                            <Trash2 className="w-4 h-4" /> Supprimer
+                        </button>
+                        <div className="border-t border-slate-100 mt-1 pt-1">
+                            <button disabled className="w-full px-3 py-2 text-left text-sm text-slate-400 flex items-center gap-2 cursor-not-allowed">
+                                <History className="w-4 h-4" /> Historique
+                            </button>
+                            <button disabled className="w-full px-3 py-2 text-left text-sm text-slate-400 flex items-center gap-2 cursor-not-allowed">
+                                <Layers className="w-4 h-4" /> Couturières liées
+                            </button>
+                            <button disabled className="w-full px-3 py-2 text-left text-sm text-slate-400 flex items-center gap-2 cursor-not-allowed">
+                                <Send className="w-4 h-4" /> Commande Fournisseur
+                            </button>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {prodModal.open && <ProductModal item={prodModal.item} onSave={saveProduct} onClose={() => setProdModal({ open: false })} />}
             {bcModal.open && bcModal.item && (

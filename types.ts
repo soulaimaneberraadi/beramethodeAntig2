@@ -143,6 +143,7 @@ export interface Material {
   stockActuel?: number;
   stockAlerte?: number;
   magasinId?: string;
+  delaiLivraison?: number;
 }
 
 export interface PurchasingData extends Material {

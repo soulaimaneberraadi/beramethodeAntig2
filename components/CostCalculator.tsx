@@ -228,6 +228,7 @@ export default function CostCalculator({
                 updatedItem.stockActuel = Number(mItem.stockActuel) || 0;
                 updatedItem.stockAlerte = Number(mItem.stockAlerte) || 0;
                 updatedItem.magasinId = mItem.id || '';
+                updatedItem.delaiLivraison = Number(mItem.delaiLivraison) || 0;
 
                 if (updatedItem.unit === 'bobine') {
                     updatedItem.threadCapacity = 5000;

@@ -73,7 +73,7 @@ export async function generateTextileOperations(articleDescription: string, avai
       .join('\n');
 
     const response = await client.models.generateContent({
-      model: 'gemini-3.0-flash', 
+      model: 'gemini-2.0-flash', 
       contents: `Rôle : Expert Méthode & Industrialisation Textile (GSD).
       CONTEXTE MACHINES : ${machinesContext}
       MISSION : Générer la Gamme de Montage pour : "${articleDescription}".
