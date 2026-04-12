@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const bcrypt = require\\('bcryptjs'\\); bcrypt.hash\\('guest2024', 10\\).then\\(h => console.log\\(h\\)\\);\")",
+      "Bash(grep -rn \"\\\\.map\\(\" components/*.tsx)",
+      "Bash(grep -n \"\\\\.map\\(\" components/*.tsx)",
+      "Bash(grep -n \"\\\\.map.*key=\" components/*.tsx)",
+      "Bash(grep -n \"\\\\.map.*=>.*{$\" components/Implantation.tsx)",
+      "Bash(grep -n \"\\\\.map.*index.*=>.*key.*index\" components/*.tsx)"
+    ]
+  }
+}
