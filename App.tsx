@@ -261,6 +261,22 @@ export default function App() {
 
     // --- STATE: NAVIGATION ---
     const [currentView, setCurrentView] = useState<'dashboard' | 'ingenierie' | 'atelier' | 'library' | 'coupe' | 'effectifs' | 'planning' | 'suivi' | 'magasin' | 'export' | 'config' | 'parametres' | 'profil' | 'admin'>('dashboard');
+    // Deep link: e.g. http://127.0.0.1:8000/#magasin
+    useEffect(() => {
+        const ALLOW = new Set([
+            'dashboard', 'ingenierie', 'atelier', 'library', 'coupe', 'effectifs',
+            'planning', 'suivi', 'magasin', 'export', 'config', 'parametres', 'profil', 'admin'
+        ]);
+        const applyHash = () => {
+            const h = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+            if (h && ALLOW.has(h)) {
+                setCurrentView(h as typeof currentView);
+            }
+        };
+        applyHash();
+        window.addEventListener('hashchange', applyHash);
+        return () => window.removeEventListener('hashchange', applyHash);
+    }, []);
     const [navigationContext, setNavigationContext] = useState<'coupe' | 'planning' | null>(null); // NEW: Track where to return to
     const [planningEvents, setPlanningEvents] = useState<import('./types').PlanningEvent[]>(() => {
         try {

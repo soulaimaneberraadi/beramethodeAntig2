@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
     server: {
-      port: 9000,
+      port: 8000,
       host: '0.0.0.0',
       watch: {
         ignored: ['**/database.sqlite*', '**/.git/**', '**/node_modules/**']

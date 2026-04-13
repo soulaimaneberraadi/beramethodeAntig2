@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed:magasin": "tsx scripts/seed-magasin-demo.ts"
   },
   "dependencies": {
     "@google/genai": "*",
