@@ -17,6 +17,8 @@ type ChaineEffectif = {
     stager: number;
     reserve: number;
     absent: number;
+    prepWorkers: number;
+    montageWorkers: number;
 };
 
 type GlobalIndirects = {
@@ -30,7 +32,8 @@ type GlobalIndirects = {
 
 export default function Effectifs({ settings }: EffectifsProps) {
     const defaultChaine: ChaineEffectif = {
-        recta: 0, surjet: 0, transp: 0, plancha: 0, man: 0, controle: 0, sp: 0, stager: 0, reserve: 0, absent: 0
+        recta: 0, surjet: 0, transp: 0, plancha: 0, man: 0, controle: 0, sp: 0, stager: 0, reserve: 0, absent: 0,
+        prepWorkers: 0, montageWorkers: 0,
     };
 
     const generateInitialChaines = (count: number) => {
@@ -168,10 +171,10 @@ export default function Effectifs({ settings }: EffectifsProps) {
                                 <tbody className="divide-y divide-slate-50">
                                     {Object.keys(defaultChaine).map((role) => (
                                         <tr key={role} className={`hover:bg-indigo-50/30 transition-colors group ${role === 'absent' ? 'bg-rose-50/20' : ''}`}>
-                                            <td className={`border-r border-slate-100 p-4 transition-colors ${role === 'absent' ? 'bg-rose-50/50 text-rose-700' : 'bg-slate-50/50 group-hover:bg-indigo-50/50 text-slate-700'}`}>
+                                            <td className={`border-r border-slate-100 p-4 transition-colors ${role === 'absent' ? 'bg-rose-50/50 text-rose-700' : role === 'prepWorkers' ? 'bg-blue-50/60 text-blue-700' : role === 'montageWorkers' ? 'bg-emerald-50/60 text-emerald-700' : 'bg-slate-50/50 group-hover:bg-indigo-50/50 text-slate-700'}`}>
                                                 <div className="font-bold uppercase tracking-wider flex items-center gap-2">
                                                     {role === 'absent' && <Users className="w-4 h-4 text-rose-500" />}
-                                                    {role === 'absent' ? 'ABSENTS (Abs)' : role}
+                                                    {role === 'absent' ? 'ABSENTS (Abs)' : role === 'prepWorkers' ? 'PRÉPARATION' : role === 'montageWorkers' ? 'MONTAGE' : role}
                                                 </div>
                                             </td>
                                             {Object.entries(chaines).map(([chaineId, data]) => (

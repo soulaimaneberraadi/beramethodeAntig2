@@ -24,15 +24,23 @@ export default function GlobalLoader({
             return;
         }
 
+        const targetProgress = Math.min(100, Math.max(0, progress));
+        // Snap to 100% when the boot sequence says so — otherwise ease animation often stops at 99%
+        // because the loader closes before the 320ms tween finishes.
+        if (targetProgress === 100) {
+            setDisplayedProgress(100);
+            return;
+        }
+
         let animationFrameId: number;
         // Easing function for smoother deceleration (easeOutExpo)
         const easeOutExpo = (x: number): number => {
             return x === 1 ? 1 : 1 - Math.pow(2, -10 * x);
         };
 
-        const duration = 1200; // ms to reach the target progress
+        // Keep this shorter than boot-step intervals (~200–400ms) or the bar lags behind `progress`.
+        const duration = 320;
         const startProgress = displayedProgress;
-        const targetProgress = Math.min(100, Math.max(0, progress));
         const startTime = performance.now();
 
         const animateProgress = (currentTime: number) => {

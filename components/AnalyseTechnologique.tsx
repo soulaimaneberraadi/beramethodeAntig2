@@ -14,7 +14,7 @@ import {
   Timer,
   Percent
 } from 'lucide-react';
-import { Machine, Operation, ComplexityFactor, StandardTime } from '../types';
+import { Machine, Operation, ComplexityFactor, StandardTime, Poste } from '../types';
 
 interface FabricSettings {
   enabled: boolean;
@@ -38,6 +38,8 @@ interface AnalyseProps {
   standardTimes: StandardTime[];
   // Receive shared fabric settings
   fabricSettings: FabricSettings;
+  assignments?: Record<string, string[]>;
+  postes?: Poste[];
 }
 
 // --- GROUP COLOR PALETTE (IMPORTED FOR CONSISTENCY) ---
@@ -54,6 +56,21 @@ const GROUP_COLORS = [
   { bg: 'bg-teal-50', border: 'border-teal-500', text: 'text-teal-700' },
   { bg: 'bg-red-50', border: 'border-red-500', text: 'text-red-700' },
   { bg: 'bg-sky-50', border: 'border-sky-500', text: 'text-sky-700' },
+];
+
+const POSTE_COLORS = [
+  { name: 'indigo', bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-100', badgeText: 'text-indigo-800', fill: '#6366f1' },
+  { name: 'orange', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-100', badgeText: 'text-orange-800', fill: '#f97316' },
+  { name: 'emerald', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100', badgeText: 'text-emerald-800', fill: '#10b981' },
+  { name: 'rose', bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-100', badgeText: 'text-rose-800', fill: '#f43f5e' },
+  { name: 'cyan', bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', badge: 'bg-cyan-100', badgeText: 'text-cyan-800', fill: '#06b6d4' },
+  { name: 'amber', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-100', badgeText: 'text-amber-800', fill: '#f59e0b' },
+  { name: 'violet', bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-100', badgeText: 'text-violet-800', fill: '#8b5cf6' },
+  { name: 'lime', bg: 'bg-lime-50', border: 'border-lime-200', text: 'text-lime-700', badge: 'bg-lime-100', badgeText: 'text-lime-800', fill: '#84cc16' },
+  { name: 'fuchsia', bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-100', badgeText: 'text-fuchsia-800', fill: '#d946ef' },
+  { name: 'teal', bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', badge: 'bg-teal-100', badgeText: 'text-teal-800', fill: '#14b8a6' },
+  { name: 'red', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'bg-red-100', badgeText: 'text-red-800', fill: '#ef4444' },
+  { name: 'sky', bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-100', badgeText: 'text-sky-800', fill: '#0ea5e9' },
 ];
 
 const getGroupStyle = (groupId: string) => {
@@ -80,8 +97,17 @@ export default function AnalyseTechnologique({
   bf,
   complexityFactors,
   standardTimes,
-  fabricSettings
+  fabricSettings,
+  assignments = {},
+  postes = []
 }: AnalyseProps) {
+  const posteColorById = new Map(
+    postes.map((poste, index) => {
+      const fallback = POSTE_COLORS[index % POSTE_COLORS.length];
+      const mapped = poste.colorName ? (POSTE_COLORS.find((color) => color.name === poste.colorName) || fallback) : fallback;
+      return [poste.id, mapped];
+    })
+  );
 
   // State for Global Stitch Count Shortcut
   const [globalStitch, setGlobalStitch] = useState<number>(4);
@@ -468,8 +494,10 @@ export default function AnalyseTechnologique({
                 const pMin = pMax > 0 ? Math.floor(pMax * (efficiency / 100)) : 0;
                 
                 const disabledIfForced = isForced;
+                const assignedPostes = assignments[op.id] || [];
+                const primaryPosteColor = assignedPostes.length > 0 ? posteColorById.get(assignedPostes[0]) : undefined;
 
-                // Group styling for Index
+                // Group styling for rows; poste is shown only as a left stripe on the first column
                 const groupStyle = op.groupId ? getGroupStyle(op.groupId) : null;
                 let groupClasses = "";
                 let groupBorderLeft = "";
@@ -479,10 +507,23 @@ export default function AnalyseTechnologique({
                 }
 
                 return (
-                  <tr key={op.id} className={`hover:bg-slate-50/80 transition-colors group ${groupClasses}`}>
-                    <td className={`py-1.5 px-2 text-center sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 border-b border-slate-100 ${groupBorderLeft}`}>
-                        <div className="flex items-center justify-center w-8 mx-auto gap-1 text-indigo-600 group-hover:text-emerald-600">
-                            <span className="font-mono text-xs font-bold">{getDisplayIndex(op, index)}</span>
+                  <tr key={op.id} className={`transition-colors group ${primaryPosteColor ? 'hover:bg-slate-50/80' : `hover:bg-slate-50/80 ${groupClasses}`}`}>
+                    <td
+                        className={`py-1.5 px-2 text-center sticky left-0 z-20 border-r border-slate-200 border-b border-slate-100 bg-white group-hover:bg-slate-50 ${primaryPosteColor ? '' : groupBorderLeft}`}
+                    >
+                        <div className="flex items-center justify-center min-w-[2.5rem]">
+                            {primaryPosteColor ? (
+                                <span
+                                    className="font-mono text-xs font-black inline-flex items-center justify-center min-w-[2rem] h-8 px-2 rounded-lg text-white shadow-sm ring-1 ring-black/10"
+                                    style={{ backgroundColor: primaryPosteColor.fill ?? '#6366f1' }}
+                                >
+                                    {getDisplayIndex(op, index)}
+                                </span>
+                            ) : (
+                                <span className="font-mono text-xs font-bold text-indigo-600 group-hover:text-emerald-600">
+                                    {getDisplayIndex(op, index)}
+                                </span>
+                            )}
                         </div>
                     </td>
                     <td className="py-1.5 px-3 border-r border-slate-100">

@@ -56,10 +56,7 @@ import {
     GitMerge,
     AlertTriangle,
     Unlink2,
-    Bot,
-    Hand,
     LayoutDashboard,
-    AlignHorizontalSpaceAround,
     AlignVerticalSpaceAround,
     RefreshCw,
     Move,
@@ -86,7 +83,6 @@ import {
     Edit,
     Link2,
     SquareDashed,
-    Magnet,
     ListOrdered,
     MessageSquare,
     RotateCw,
@@ -119,8 +115,8 @@ interface ImplantationProps {
     setPostes?: React.Dispatch<React.SetStateAction<Poste[]>>;
     layoutMemory?: Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>;
     setLayoutMemory?: React.Dispatch<React.SetStateAction<Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>>>;
-    activeLayout?: 'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line';
-    setActiveLayout?: React.Dispatch<React.SetStateAction<'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line'>>;
+    activeLayout?: 'zigzag' | 'free' | 'line' | 'double-zigzag';
+    setActiveLayout?: React.Dispatch<React.SetStateAction<'zigzag' | 'free' | 'line' | 'double-zigzag'>>;
     machines: Machine[];
     // Calculation Params
     speedFactors: any[];
@@ -209,6 +205,7 @@ interface Workstation extends Poste {
     gammeOrderMin: number;
     isPlaced?: boolean;
     status?: 'ok' | 'panne';
+    dominantSection?: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
 }
 
 const DimensionMarkerHorizontal = ({ label }: { label: string }) => (
@@ -497,11 +494,11 @@ const LinkOverlay = ({
                     <foreignObject x={p.labelX - (60 / zoom)} y={p.labelY - (15 / zoom)} width={120 / zoom} height={30 / zoom} className="overflow-visible">
                         <div className="flex items-center justify-center gap-1 hover:scale-110 transition-transform origin-center" style={{ transform: `scale(${1 / zoom})` }}>
                             {p.label ? (
-                                <div onClick={() => onEditLabel(p.id, p.label)} className="bg-white/90 backdrop-blur-sm text-slate-700 text-[10px] font-bold px-2 py-1 rounded-lg shadow-md border border-slate-200 whitespace-nowrap cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 max-w-[100px] truncate relative z-50" title={p.label}>{p.label}</div>
+                                <div onClick={() => onEditLabel(p.id, p.label)} className="bg-white/90  text-slate-700 text-[10px] font-bold px-2 py-1 rounded-lg shadow-md border border-slate-200 whitespace-nowrap cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 max-w-[100px] truncate relative z-50" title={p.label}>{p.label}</div>
                             ) : (
-                                <button onClick={() => onEditLabel(p.id)} className="bg-white/90 backdrop-blur-sm p-1 rounded-full border border-slate-200 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-indigo-500 relative z-50"><MessageSquare className="w-3 h-3" /></button>
+                                <button onClick={() => onEditLabel(p.id)} className="bg-white/90  p-1 rounded-full border border-slate-200 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-indigo-500 relative z-50"><MessageSquare className="w-3 h-3" /></button>
                             )}
-                            <button onClick={() => onRemoveLink(p.id)} className="bg-white/90 backdrop-blur-sm text-slate-300 p-1 rounded-full border border-slate-200 shadow-sm hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity relative z-50"><X className="w-3 h-3" /></button>
+                            <button onClick={() => onRemoveLink(p.id)} className="bg-white/90  text-slate-300 p-1 rounded-full border border-slate-200 shadow-sm hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity relative z-50"><X className="w-3 h-3" /></button>
                         </div>
                     </foreignObject>
                 </g>
@@ -561,15 +558,30 @@ export default function Implantation({
     const prodHour100 = hours > 0 ? prodDay100 / hours : 0;
     const prodHourEff = hours > 0 ? prodDayEff / hours : 0;
 
+    // --- SECTION METRICS ---
+    const preparationMetrics = useMemo(() => {
+        const prepTime = operations.filter(op => op.section === 'PREPARATION').reduce((sum, op) => sum + (op.time || 0), 0) * 1.20;
+        const workers = postes?.filter(p => (p.machine !== 'VIDE' || p.isPlaced) && (p as any).dominantSection === 'PREPARATION').length || 0;
+        const hourly = prepTime > 0 && workers > 0 ? (60 * workers) / prepTime : 0;
+        return { time: prepTime, workers, hourly: Math.round(hourly) };
+    }, [operations, postes]);
+
+    const montageMetrics = useMemo(() => {
+        const montTime = operations.filter(op => op.section === 'MONTAGE').reduce((sum, op) => sum + (op.time || 0), 0) * 1.20;
+        const workers = postes?.filter(p => (p.machine !== 'VIDE' || p.isPlaced) && (p as any).dominantSection === 'MONTAGE').length || 0;
+        const hourly = montTime > 0 && workers > 0 ? (60 * workers) / montTime : 0;
+        return { time: montTime, workers, hourly: Math.round(hourly) };
+    }, [operations, postes]);
+
     // --- STATE ---
     // Use prop if available, otherwise fallback to local state (though prop should always be passed now)
-    const [localLayoutType, setLocalLayoutType] = useState<'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line'>('zigzag');
+    const [localLayoutType, setLocalLayoutType] = useState<'zigzag' | 'free' | 'line' | 'double-zigzag'>('line');
     const layoutType = activeLayout || localLayoutType;
     const setLayoutType = setActiveLayout || setLocalLayoutType;
 
     // REMOVED LOCAL layoutMemory - USING PROPS
 
-    const handleLayoutChange = (newType: 'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line') => {
+    const handleLayoutChange = (newType: 'zigzag' | 'free' | 'line' | 'double-zigzag') => {
         if (layoutType === newType) return;
 
         if (setPostes && postes && layoutMemory && setLayoutMemory) {
@@ -650,7 +662,32 @@ export default function Implantation({
     const [matPanel, setMatPanel] = useState({ x: window.innerWidth - 340, y: 120, w: 300, h: 400 });
     const [isDraggingMat, setIsDraggingMat] = useState(false);
     const [isResizingMat, setIsResizingMat] = useState(false);
+    const fullscreenWrapperRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
     const [isFullScreen, setIsFullScreen] = useState(false);
+
+    const toggleFullScreen = () => {
+        if (!document.fullscreenElement) {
+            if (fullscreenWrapperRef.current?.requestFullscreen) {
+                fullscreenWrapperRef.current.requestFullscreen().catch(err => {
+                    console.error(`Error attempting to enable fullscreen: ${err.message}`);
+                    setIsFullScreen(true); // Fallback
+                });
+            } else {
+                setIsFullScreen(true);
+            }
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen().catch(err => {
+                    console.error(err);
+                    setIsFullScreen(false);
+                });
+            } else {
+                setIsFullScreen(false);
+            }
+        }
+    };
     const [isExporting, setIsExporting] = useState(false);
     const [showExportOptions, setShowExportOptions] = useState(false);
     const [exportSettings, setExportSettings] = useState({
@@ -675,18 +712,38 @@ export default function Implantation({
 
     // --- NEW: LAYOUT MENU TOGGLE STATE ---
     const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
+    const didInitialLayoutGuardRef = useRef(false);
 
     // --- PANNING STATE (NEW) ---
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
     const panStartRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
 
-    // Listen for Space Key
+    // Listen for Space, F, and Escape Keys
     useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullScreen(!!document.fullscreenElement);
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.code === 'Space' && !e.repeat && (e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+            const isInput = (e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA';
+            if (isInput) return;
+
+            if (e.code === 'Space' && !e.repeat) {
                 e.preventDefault(); // Prevent scrolling
                 setIsSpacePressed(true);
+            }
+            if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                e.preventDefault();
+                toggleFullScreen();
+            }
+            if (e.key === 'Escape') {
+                if (document.fullscreenElement && document.exitFullscreen) {
+                    document.exitFullscreen().catch(() => setIsFullScreen(false));
+                } else if (isFullScreen) {
+                    setIsFullScreen(false);
+                }
             }
         };
         const handleKeyUp = (e: KeyboardEvent) => {
@@ -698,19 +755,22 @@ export default function Implantation({
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
         return () => {
+            document.removeEventListener('fullscreenchange', handleFullscreenChange);
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, []);
+    }, [isFullScreen]);
 
-    const toggleMagnetic = () => {
-        if (!isMagnetic) { compactPostes(); }
-        setIsMagnetic(!isMagnetic);
-    };
+    // Sync isManualMode from the persisted layoutType on first mount
+    useEffect(() => {
+        if (didInitialLayoutGuardRef.current) return;
+        didInitialLayoutGuardRef.current = true;
+        setIsManualMode(layoutType === 'free');
+    }, [layoutType]);
 
     const activateAutoMode = () => {
         setIsManualMode(false);
-        setLayoutType('zigzag');
+        setLayoutType('double-zigzag');
         if (setPostes && postes) {
             const newPostes = postes.filter(p => p.machine !== 'VIDE').map(p => ({ ...p, isPlaced: true }));
             setPostes(newPostes);
@@ -745,8 +805,7 @@ export default function Implantation({
                     splitPosts.push({ ...p, isPlaced: false });
                 }
             });
-            const emptySlots: Poste[] = Array.from({ length: 20 }).map((_, i) => ({ id: `empty-${Date.now()}-${i}`, name: `P${i + 1}`, machine: 'VIDE', isPlaced: true, colorName: 'vide' }));
-            setPostes([...emptySlots, ...splitPosts]);
+            setPostes(splitPosts);
         }
     };
 
@@ -843,7 +902,7 @@ export default function Implantation({
         try {
             const element = contentRef.current;
             const clone = element.cloneNode(true) as HTMLElement;
-            
+
             // Get original dimensions
             let width = element.scrollWidth;
             let height = element.scrollHeight;
@@ -858,6 +917,59 @@ export default function Implantation({
                 });
                 width = 1122;
                 // Height will be auto-calculated later
+            } else if (layoutType === 'free') {
+                // AUTO-CROP KWA (EMPTY SPACE) FOR FREE MODE
+                const stations = clone.querySelectorAll('[id^="station-card-"]');
+                let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+                stations.forEach(st => {
+                    const el = st as HTMLElement;
+                    // Try to get X, Y from style
+                    const x = parseFloat(el.style.left) || 0;
+                    const y = parseFloat(el.style.top) || 0;
+                    const w = 180; // approximate card width
+                    const h = 120; // approximate card height
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x + w > maxX) maxX = x + w;
+                    if (y + h > maxY) maxY = y + h;
+                });
+
+                if (minX < Infinity && maxX > minX) {
+                    const padX = 50;
+                    const padY = 50;
+
+                    // Shift all elements
+                    stations.forEach(st => {
+                        const el = st as HTMLElement;
+                        const x = parseFloat(el.style.left) || 0;
+                        const y = parseFloat(el.style.top) || 0;
+                        el.style.left = `${x - minX + padX}px`;
+                        el.style.top = `${y - minY + padY}px`;
+                    });
+
+                    // Shift SVG
+                    const svg = clone.querySelector('svg');
+                    if (svg) {
+                        svg.style.marginLeft = `-${minX - padX}px`;
+                        svg.style.marginTop = `-${minY - padY}px`;
+                    }
+
+                    const newWidth = maxX - minX + (padX * 2);
+                    const newHeight = maxY - minY + (padY * 2);
+
+                    const rootDiv = clone.querySelector('.relative.w-\\[3000px\\]') as HTMLElement;
+                    if (rootDiv) {
+                        rootDiv.style.width = `${newWidth}px`;
+                        rootDiv.style.height = `${newHeight}px`;
+                    }
+
+                    width = newWidth;
+                    height = newHeight;
+                    clone.style.width = `${newWidth}px`;
+                } else {
+                    width = width + 200;
+                    clone.style.width = `${width}px`;
+                }
             } else {
                 width = width + 200; // Add padding
                 clone.style.width = `${width}px`;
@@ -872,7 +984,7 @@ export default function Implantation({
             wrapper.style.top = '-9999px';
             wrapper.style.left = '-9999px';
             wrapper.style.zIndex = '-100';
-            
+
             // 1. ADD HEADER IF OPTION ENABLED
             if (exportSettings.header) {
                 const header = document.createElement('div');
@@ -927,7 +1039,7 @@ export default function Implantation({
             }
 
             // Put the layout clone inside the wrapper
-            clone.style.position = 'relative'; 
+            clone.style.position = 'relative';
             clone.style.left = '0';
             clone.style.top = '0';
             clone.style.transform = 'scale(1)';
@@ -1087,9 +1199,7 @@ export default function Implantation({
 
     const canEdit = !!setPostes && !!postes && postes.length > 0;
 
-    const fullscreenWrapperRef = useRef<HTMLDivElement>(null);
-    const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const contentRef = useRef<HTMLDivElement>(null);
+    // Refs have been moved up to support native fullscreen implementation
 
     // ... (Event Handlers: Click, Drag, Drop, Context, etc.) ...
     useEffect(() => {
@@ -1192,6 +1302,7 @@ export default function Implantation({
         if (isSpacePressed) return; // Allow panning instead of dragging items if space is pressed
 
         if (e.type === 'mousedown' && (e as React.MouseEvent).button !== 0) return;
+        e.preventDefault();
 
         let clientX, clientY;
         if (e.type === 'touchstart') {
@@ -1244,6 +1355,21 @@ export default function Implantation({
                 dx = snapX - startLeft;
                 dy = snapY - startTop;
             }
+
+            // --- Bounding Box Constraints to prevent cards from hiding under UI ---
+            const MIN_X = 24;
+            const MIN_Y = 24;
+            const MAX_X = 3000 - 240; // canvas width - approximate workstation width
+            const MAX_Y = 2000 - 160; // canvas height - approximate workstation height
+
+            let finalX = startLeft + dx;
+            let finalY = startTop + dy;
+
+            finalX = Math.max(MIN_X, Math.min(MAX_X, finalX));
+            finalY = Math.max(MIN_Y, Math.min(MAX_Y, finalY));
+
+            dx = finalX - startLeft;
+            dy = finalY - startTop;
 
             if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
                 freeDragRef.current.hasMoved = true;
@@ -1366,25 +1492,7 @@ export default function Implantation({
         }
     };
 
-    const toggleFullScreen = () => {
-        if (!document.fullscreenElement) {
-            if (fullscreenWrapperRef.current) {
-                fullscreenWrapperRef.current.requestFullscreen().catch((err) => {
-                    console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-                });
-            }
-        } else {
-            document.exitFullscreen();
-        }
-    };
-
-    useEffect(() => {
-        const handleFullScreenChange = () => {
-            setIsFullScreen(!!document.fullscreenElement);
-        };
-        document.addEventListener('fullscreenchange', handleFullScreenChange);
-        return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
-    }, []);
+    // Removed native fullscreen logic to rely on robust CSS fixed layout
 
     useEffect(() => {
         const handleWheel = (e: WheelEvent) => {
@@ -1586,15 +1694,24 @@ export default function Implantation({
                 }
 
                 const isBroken = p.notes?.includes('#PANNE');
-                return { ...p, index: 0, originalIndex: realIndex, operations: assignedOps, totalTime, saturation, operators, color, groups, feedsInto, isFeeder, gammeOrderMin, isPlaced: p.isPlaced, status: isBroken ? 'panne' : 'ok', x: p.x, y: p.y, rotation: p.rotation, shape: p.shape };
+                // Section dominante: somme du temps par section sur les ops du poste
+                const sectionTimes: Record<string, number> = { PREPARATION: 0, MONTAGE: 0, GLOBAL: 0 };
+                assignedOps.forEach(o => { sectionTimes[o.section || 'GLOBAL'] += (o.time || 0); });
+                const dominantSection: 'PREPARATION' | 'MONTAGE' | 'GLOBAL' =
+                    sectionTimes.PREPARATION > sectionTimes.MONTAGE && sectionTimes.PREPARATION > sectionTimes.GLOBAL ? 'PREPARATION'
+                        : sectionTimes.MONTAGE > sectionTimes.GLOBAL ? 'MONTAGE'
+                            : 'GLOBAL';
+                return { ...p, index: 0, originalIndex: realIndex, operations: assignedOps, totalTime, saturation, operators, color, groups, feedsInto, isFeeder, gammeOrderMin, isPlaced: p.isPlaced, status: isBroken ? 'panne' : 'ok', x: p.x, y: p.y, rotation: p.rotation, shape: p.shape, dominantSection };
             });
 
             const sortedStations = [...initialStations];
             const expandedResult: Workstation[] = [];
             sortedStations.forEach((st, idx) => {
-                const showOnCanvas = isManualMode ? (st.isPlaced === true || st.machine === 'VIDE') : true;
+                const showOnCanvas = isManualMode
+                    ? (st.isPlaced === true && st.machine !== 'VIDE')
+                    : true;
                 if (showOnCanvas) {
-                    if (st.originalId) {
+                    if (isManualMode || st.originalId || st.operators <= 1) {
                         expandedResult.push({ ...st, index: expandedResult.length + 1, isPlaced: true });
                     } else {
                         for (let i = 1; i <= st.operators; i++) {
@@ -1648,18 +1765,82 @@ export default function Implantation({
         });
     }, [postes, isManualMode, operations, assignments, bf]);
 
-    const compactPostes = () => { if (!setPostes || !postes) return; const placed = postes.filter(p => p.isPlaced && p.machine !== 'VIDE'); const unplaced = postes.filter(p => !p.isPlaced && p.machine !== 'VIDE'); const emptySlotsNeeded = Math.max(0, 20 - placed.length); const empties: Poste[] = Array.from({ length: emptySlotsNeeded }).map((_, i) => ({ id: `empty-auto-${Date.now()}-${i}`, name: `Slot`, machine: 'VIDE', isPlaced: true, colorName: 'vide' })); let pCount = 1; const newPlaced = placed.map(p => ({ ...p, name: `P${pCount++}` })); setPostes([...newPlaced, ...empties, ...unplaced]); };
+    const compactPostes = () => {
+        if (!setPostes || !postes) return;
+        const placed = postes.filter(p => p.isPlaced && p.machine !== 'VIDE');
+        const unplaced = postes.filter(p => !p.isPlaced && p.machine !== 'VIDE');
+        let pCount = 1;
+        const newPlaced = placed.map(p => ({ ...p, name: `P${pCount++}` }));
+        setPostes([...newPlaced, ...unplaced]);
+    };
     const renumberStations = () => { if (!setPostes || !postes) return; let pCount = 1; const reindexed = postes.map((p) => { if (p.isPlaced && p.machine !== 'VIDE') { return { ...p, name: `P${pCount++}` }; } return p; }); setPostes(reindexed); };
+    const restoreGammeOrder = () => {
+        if (!setPostes || !postes) return;
 
-    const handleManualDrop = (stationId: string) => {
+        const getMinOpOrder = (poste: Poste) => {
+            const assignedOrders = operations
+                .filter(op => assignments?.[op.id]?.some(assignedId => assignedId === poste.id || (poste.originalId && assignedId === poste.originalId)))
+                .map(op => op.order);
+            return assignedOrders.length > 0 ? Math.min(...assignedOrders) : Number.MAX_SAFE_INTEGER;
+        };
+
+        const allPostes = [...postes];
+        const indexedPostes = allPostes.map((p, idx) => ({ poste: p, idx }));
+        const placedReal = indexedPostes.filter(({ poste }) => poste.isPlaced && poste.machine !== 'VIDE');
+        const others = indexedPostes.filter(({ poste }) => !(poste.isPlaced && poste.machine !== 'VIDE'));
+
+        if (placedReal.length <= 1) return;
+
+        const sortedPlaced = [...placedReal].sort((a, b) => {
+            const byOrder = getMinOpOrder(a.poste) - getMinOpOrder(b.poste);
+            return byOrder !== 0 ? byOrder : a.idx - b.idx;
+        });
+
+        let pCount = 1;
+        const renumberedPlaced = sortedPlaced.map(({ poste }) => ({ ...poste, name: `P${pCount++}` }));
+        setPostes([...renumberedPlaced, ...others.map(({ poste }) => poste)]);
+    };
+
+    const placeAllOnCanvas = () => {
+        if (!setPostes || !postes) return;
+        const unplaced = postes.filter(p => !p.isPlaced && p.machine !== 'VIDE');
+        if (unplaced.length === 0) return;
+        const alreadyPlaced = postes.filter(p => p.isPlaced);
+        const startIdx = alreadyPlaced.length;
+        const cols = Math.max(6, Math.ceil(Math.sqrt(unplaced.length + startIdx)));
+        const newPostes = postes.map(p => {
+            if (!p.isPlaced && p.machine !== 'VIDE') {
+                const globalIdx = startIdx + unplaced.indexOf(p);
+                const col = globalIdx % cols;
+                const row = Math.floor(globalIdx / cols);
+                return { ...p, isPlaced: true, x: 60 + col * 230, y: 60 + row * 170 };
+            }
+            return p;
+        });
+        setPostes(newPostes);
+    };
+
+    const handleManualDrop = (stationId: string, dropPos?: { x: number; y: number }) => {
         if (setPostes && postes) {
             const stationFromWaiting = postes.find(p => p.id === stationId && !p.isPlaced);
             if (stationFromWaiting) {
                 const newPostes = [...postes];
                 const idx = newPostes.findIndex(p => p.id === stationId);
                 if (idx !== -1) {
-                    const item = { ...newPostes[idx], isPlaced: true };
+                    const item = {
+                        ...newPostes[idx],
+                        isPlaced: true,
+                        x: dropPos?.x ?? newPostes[idx].x,
+                        y: dropPos?.y ?? newPostes[idx].y
+                    };
                     newPostes.splice(idx, 1);
+                    if (layoutType === 'free') {
+                        const placed = newPostes.filter(p => p.isPlaced);
+                        const unplaced = newPostes.filter(p => !p.isPlaced);
+                        newPostes.splice(0, newPostes.length, ...placed, item, ...unplaced);
+                        setPostes(newPostes);
+                        return;
+                    }
                     if (isMagnetic) {
                         const firstEmptySlotIdx = newPostes.findIndex(p => p.machine === 'VIDE' && p.isPlaced);
                         if (firstEmptySlotIdx !== -1) { newPostes[firstEmptySlotIdx] = item; } else { const placed = newPostes.filter(p => p.isPlaced); const unplaced = newPostes.filter(p => !p.isPlaced); newPostes.splice(0, newPostes.length, ...placed, item, ...unplaced); }
@@ -1688,15 +1869,8 @@ export default function Implantation({
                     if (isMagnetic) {
                         newPostes.splice(idx, 1); // Remove from current position
                         newPostes.push(itemToRemove); // Add to end (waiting list)
-
-                        // Add empty slot to fill gap if needed (magnetic behavior)
-                        const videItem: Poste = { id: `empty-auto-fill-${Date.now()}`, name: 'Slot', machine: 'VIDE', isPlaced: true, colorName: 'vide' };
-                        let lastPlacedIdx = -1;
-                        for (let i = newPostes.length - 1; i >= 0; i--) { if (newPostes[i].isPlaced) { lastPlacedIdx = i; break; } }
-                        newPostes.splice(lastPlacedIdx + 1, 0, videItem);
                     } else {
-                        const videItem: Poste = { id: `empty-replaced-${Date.now()}`, name: 'Slot', machine: 'VIDE', isPlaced: true, colorName: 'vide' };
-                        newPostes[idx] = videItem; // Replace with empty slot
+                        newPostes.splice(idx, 1); // Remove from canvas position
                         newPostes.push(itemToRemove); // Add to end (waiting list)
                     }
                 } else {
@@ -1757,21 +1931,164 @@ export default function Implantation({
     const toggleSimulation = () => { if (simulationActive) { setSimulationActive(false); } else { setSimStep(-1); setSimulationActive(true); } };
     const resetSimulation = () => { setSimulationActive(false); setSimStep(-1); };
 
-    // UPDATED U-LINE (ZIGZAG) LOGIC
-    const sigZagData = useMemo(() => {
-        if (!workstations || workstations.length === 0) return { topRow: [], bottomRow: [] };
-        
+    // ═══════════════════════════════════════════════════════════════
+    // SECTIONS & ALTERNATING DISTRIBUTION (Used by ALL structured layouts)
+    // ═══════════════════════════════════════════════════════════════
+    const structureSections = useMemo(() => {
+        if (!workstations || workstations.length === 0) return [];
         const validStations = workstations.filter(st => st.machine !== 'VIDE' || isManualMode);
-        if (validStations.length === 0) return { topRow: [], bottomRow: [] };
+        
+        const prep = validStations.filter(st => st.dominantSection === 'PREPARATION');
+        const montage = validStations.filter(st => st.dominantSection === 'MONTAGE');
+        const global = validStations.filter(st => st.dominantSection === 'GLOBAL');
 
-        const half = Math.ceil(validStations.length / 2);
-        const topRow = validStations.slice(0, half);
-        const bottomRow = validStations.slice(half); 
+        const sections = [];
+        if (prep.length > 0) sections.push({ 
+            id: 'PREPARATION', 
+            name: 'PRÉPARATION', 
+            stations: prep, 
+            theme: 'amber', 
+            hourly: preparationMetrics?.hourly || null 
+        });
+        if (montage.length > 0) sections.push({ 
+            id: 'MONTAGE', 
+            name: 'MONTAGE', 
+            stations: montage, 
+            theme: 'sky', 
+            hourly: montageMetrics?.hourly || null 
+        });
+        if (global.length > 0) sections.push({ 
+            id: 'GLOBAL', 
+            name: (prep.length || montage.length) ? 'ZONE COMMUNE' : 'PRODUCTION GLOBALE', 
+            stations: global, 
+            theme: 'indigo', 
+            hourly: Math.round(prodHour100) 
+        });
+        
+        // Fallback or full unified layout
+        if (prep.length === 0 && montage.length === 0 && global.length === 0 && validStations.length > 0) {
+             sections.push({
+                id: 'GLOBAL',
+                name: 'Flux de Production',
+                stations: validStations,
+                theme: 'indigo',
+                hourly: Math.round(prodHour100)
+             });
+        }
+        
+        return sections;
+    }, [workstations, isManualMode, preparationMetrics, montageMetrics, prodHour100]);
 
+    // Legacy groupings
+    const alternatingRows = useMemo(() => {
+        if (!workstations || workstations.length === 0) return { topRow: [], bottomRow: [] };
+        const validStations = workstations.filter(st => st.machine !== 'VIDE' || isManualMode);
+        const topRow: Workstation[] = [];
+        const bottomRow: Workstation[] = [];
+        validStations.forEach((st, index) => {
+            if (index % 2 === 0) { topRow.push(st); } else { bottomRow.push(st); }
+        });
         return { topRow, bottomRow };
     }, [workstations, isManualMode]);
+
+    const sigZagData = alternatingRows;
+    const doubleZigzagData = { sideA: alternatingRows.topRow, sideB: alternatingRows.bottomRow };
     const wheatGroups = useMemo(() => { const groups = []; let currentGroup: { left: Workstation | null, right: Workstation | null } = { left: null, right: null }; workstations.forEach((st, i) => { if (!currentGroup.left) { currentGroup.left = st; } else { currentGroup.right = st; groups.push(currentGroup); currentGroup = { left: null, right: null }; } }); if (currentGroup.left) { groups.push(currentGroup); } return groups; }, [workstations]);
     const machinesSummary = useMemo(() => { const summary: Record<string, number> = {}; let total = 0; workstations.forEach(st => { const mName = st.machine.toUpperCase().includes('MAN') ? 'MAN' : st.machine; if (!summary[mName]) summary[mName] = 0; summary[mName] += 1; total += 1; }); return { counts: Object.entries(summary), total }; }, [workstations]);
+
+    const SECTION_LABELS: Record<'PREPARATION' | 'MONTAGE' | 'GLOBAL', string> = {
+        PREPARATION: 'Préparation',
+        MONTAGE: 'Montage',
+        GLOBAL: 'Zone Commune / Manager'
+    };
+    const isSectionSplitEnabled = useMemo(
+        () => operations.some(op => (op.section || 'GLOBAL') !== 'GLOBAL'),
+        [operations]
+    );
+    const [sectionTransferDialog, setSectionTransferDialog] = useState<null | {
+        posteName: string;
+        source: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
+        target: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
+        mode: 'confirm-transfer' | 'global-choice';
+    }>(null);
+    const pendingSectionTransferRef = useRef<null | {
+        newPostes: Poste[];
+        movedPoste: Poste;
+        source: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
+        target: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
+    }>(null);
+
+    const getDominantSectionForPoste = useCallback((poste: Poste): 'PREPARATION' | 'MONTAGE' | 'GLOBAL' => {
+        if (!assignments) return 'GLOBAL';
+        const sectionTimes: Record<'PREPARATION' | 'MONTAGE' | 'GLOBAL', number> = { PREPARATION: 0, MONTAGE: 0, GLOBAL: 0 };
+        operations.forEach(op => {
+            const assigned = assignments[op.id] || [];
+            const linked = assigned.includes(poste.id) || (!!poste.originalId && assigned.includes(poste.originalId));
+            if (linked) {
+                sectionTimes[(op.section || 'GLOBAL') as 'PREPARATION' | 'MONTAGE' | 'GLOBAL'] += (op.time || 0);
+            }
+        });
+        if (sectionTimes.PREPARATION > sectionTimes.MONTAGE && sectionTimes.PREPARATION > sectionTimes.GLOBAL) return 'PREPARATION';
+        if (sectionTimes.MONTAGE > sectionTimes.GLOBAL) return 'MONTAGE';
+        return 'GLOBAL';
+    }, [assignments, operations]);
+
+    const openSectionTransferDialog = (
+        source: 'PREPARATION' | 'MONTAGE' | 'GLOBAL',
+        target: 'PREPARATION' | 'MONTAGE' | 'GLOBAL',
+        posteName: string,
+        newPostes: Poste[],
+        movedPoste: Poste
+    ): boolean => {
+        if (source === target) return false;
+        pendingSectionTransferRef.current = { newPostes, movedPoste, source, target };
+        setSectionTransferDialog({
+            posteName,
+            source,
+            target,
+            mode: (source === 'GLOBAL' || target === 'GLOBAL') ? 'global-choice' : 'confirm-transfer'
+        });
+        return true;
+    };
+
+    const applySectionToPosteOperations = (poste: Poste, section: 'PREPARATION' | 'MONTAGE') => {
+        if (!assignments || !setOperations) return;
+        const baseIds = new Set<string>([poste.id]);
+        if (poste.originalId) baseIds.add(poste.originalId);
+        setOperations(prev => prev.map(op => {
+            const assigned = assignments[op.id] || [];
+            const linked = assigned.some(aid => baseIds.has(aid));
+            if (!linked) return op;
+            return { ...op, section };
+        }));
+    };
+
+    const resolveSectionTransferDialog = (decision: 'cancel' | 'keep-global' | 'set-prep' | 'set-montage' | 'confirm-target') => {
+        const pending = pendingSectionTransferRef.current;
+        if (!pending) {
+            setSectionTransferDialog(null);
+            return;
+        }
+        if (decision === 'cancel') {
+            pendingSectionTransferRef.current = null;
+            setSectionTransferDialog(null);
+            return;
+        }
+
+        let applySection: 'PREPARATION' | 'MONTAGE' | undefined;
+        if (decision === 'set-prep') applySection = 'PREPARATION';
+        if (decision === 'set-montage') applySection = 'MONTAGE';
+        if (decision === 'confirm-target' && pending.target !== 'GLOBAL') {
+            applySection = pending.target;
+        }
+
+        if (applySection) {
+            applySectionToPosteOperations(pending.movedPoste, applySection);
+        }
+        setPostes?.(pending.newPostes);
+        pendingSectionTransferRef.current = null;
+        setSectionTransferDialog(null);
+    };
 
     const handleDragStart = (e: React.DragEvent, index: number, isWaitingList = false, stationId?: string) => {
         if (isSpacePressed) { e.preventDefault(); return; } // Prevent drag if panning
@@ -1779,7 +2096,84 @@ export default function Implantation({
         if (isWaitingList && stationId) { e.dataTransfer.setData("stationId", stationId); e.dataTransfer.effectAllowed = "copy"; } else if (!canEdit || !isManualMode) { return; } else { setDraggedStationIdx(index); e.dataTransfer.effectAllowed = "move"; } setEditModal(null);
     };
     const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
-    const handleDrop = (e: React.DragEvent, targetPosteIdx: number) => { e.preventDefault(); e.stopPropagation(); if (isLinking) return; const droppedStationId = e.dataTransfer.getData("stationId"); if (isManualMode && setPostes && postes) { let newPostes = [...postes]; const targetItem = newPostes[targetPosteIdx]; if (!targetItem) return; if (droppedStationId) { const waitingStationIdx = newPostes.findIndex(p => p.id === droppedStationId); if (waitingStationIdx === -1) return; const stationToPlace = { ...newPostes[waitingStationIdx], isPlaced: true }; newPostes.splice(waitingStationIdx, 1); let adjustedTargetIdx = targetPosteIdx; if (waitingStationIdx < targetPosteIdx) { adjustedTargetIdx--; } if (isMagnetic) { newPostes.splice(adjustedTargetIdx, 0, stationToPlace); } else { const currentTarget = newPostes[adjustedTargetIdx]; if (currentTarget && currentTarget.machine === 'VIDE') { newPostes[adjustedTargetIdx] = stationToPlace; } else { newPostes.splice(adjustedTargetIdx, 0, stationToPlace); } } } else if (draggedStationIdx !== null && draggedStationIdx !== undefined) { const sourceRealIdx = draggedStationIdx; if (sourceRealIdx === -1 || sourceRealIdx >= newPostes.length) return; if (sourceRealIdx === targetPosteIdx) { setDraggedStationIdx(null); return; } const sourceItem = newPostes[sourceRealIdx]; const targetSlotItem = newPostes[targetPosteIdx]; if (!sourceItem || !targetSlotItem) return; if (isMagnetic) { newPostes.splice(sourceRealIdx, 1); let finalTargetIdx = targetPosteIdx; if (sourceRealIdx < targetPosteIdx) finalTargetIdx--; newPostes.splice(finalTargetIdx, 0, sourceItem); } else { newPostes[targetPosteIdx] = sourceItem; newPostes[sourceRealIdx] = targetSlotItem; } } setPostes(newPostes); setDraggedStationIdx(null); } };
+    const handleDrop = (e: React.DragEvent, targetPosteIdx: number) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isLinking) return;
+
+        const droppedStationId = e.dataTransfer.getData("stationId");
+        if (!(isManualMode && setPostes && postes)) return;
+
+        let newPostes = [...postes];
+        const targetItem = newPostes[targetPosteIdx];
+        if (!targetItem) return;
+
+        let movedPoste: Poste | null = null;
+        let targetReferencePoste: Poste | null = targetItem;
+
+        if (droppedStationId) {
+            const waitingStationIdx = newPostes.findIndex(p => p.id === droppedStationId);
+            if (waitingStationIdx === -1) return;
+            const stationToPlace = { ...newPostes[waitingStationIdx], isPlaced: true };
+            movedPoste = stationToPlace;
+
+            newPostes.splice(waitingStationIdx, 1);
+            let adjustedTargetIdx = targetPosteIdx;
+            if (waitingStationIdx < targetPosteIdx) adjustedTargetIdx--;
+
+            if (isMagnetic) {
+                newPostes.splice(adjustedTargetIdx, 0, stationToPlace);
+            } else {
+                const currentTarget = newPostes[adjustedTargetIdx];
+                if (currentTarget && currentTarget.machine === 'VIDE') {
+                    newPostes[adjustedTargetIdx] = stationToPlace;
+                } else {
+                    newPostes.splice(adjustedTargetIdx, 0, stationToPlace);
+                }
+            }
+        } else if (draggedStationIdx !== null && draggedStationIdx !== undefined) {
+            const sourceRealIdx = draggedStationIdx;
+            if (sourceRealIdx === -1 || sourceRealIdx >= newPostes.length) return;
+            if (sourceRealIdx === targetPosteIdx) {
+                setDraggedStationIdx(null);
+                return;
+            }
+            const sourceItem = newPostes[sourceRealIdx];
+            const targetSlotItem = newPostes[targetPosteIdx];
+            if (!sourceItem || !targetSlotItem) return;
+            movedPoste = sourceItem;
+            targetReferencePoste = targetSlotItem;
+
+            if (isMagnetic) {
+                newPostes.splice(sourceRealIdx, 1);
+                let finalTargetIdx = targetPosteIdx;
+                if (sourceRealIdx < targetPosteIdx) finalTargetIdx--;
+                newPostes.splice(finalTargetIdx, 0, sourceItem);
+            } else {
+                newPostes[targetPosteIdx] = sourceItem;
+                newPostes[sourceRealIdx] = targetSlotItem;
+            }
+        }
+
+        if (
+            isSectionSplitEnabled &&
+            movedPoste &&
+            targetReferencePoste &&
+            movedPoste.machine !== 'VIDE' &&
+            targetReferencePoste.machine !== 'VIDE'
+        ) {
+            const sourceSection = getDominantSectionForPoste(movedPoste);
+            const targetSection = getDominantSectionForPoste(targetReferencePoste);
+            const needsDecision = openSectionTransferDialog(sourceSection, targetSection, movedPoste.name, newPostes, movedPoste);
+            if (needsDecision) {
+                setDraggedStationIdx(null);
+                return;
+            }
+        }
+
+        setPostes(newPostes);
+        setDraggedStationIdx(null);
+    };
 
     const handleAddPost = () => { if (!setPostes || !postes) return; const newId = `P${postes.length + 1}`; const newPoste: Poste = { id: newId, name: newId, machine: selectedMachineToAdd, notes: '', operatorName: '', isPlaced: isManualMode }; setPostes([...postes, newPoste]); };
     const reorderPostes = (list: Poste[], isSwapped: boolean) => { const isControl = (p: Poste) => { const m = p.machine.toUpperCase(); return m.includes('CONTROLE') || m.includes('CONTROL'); }; const isFinition = (p: Poste) => { const m = p.machine.toUpperCase(); return m.includes('FINITION'); }; const control = list.filter(isControl); const finition = list.filter(isFinition); const others = list.filter(p => !isControl(p) && !isFinition(p)); const newOrder = isSwapped ? [...others, ...control, ...finition] : [...others, ...finition, ...control]; return newOrder.map((p, i) => ({ ...p, name: `P${i + 1}` })); };
@@ -1796,10 +2190,10 @@ export default function Implantation({
 
     const StationCard: React.FC<{ station: Workstation; isGrid?: boolean; isMini?: boolean }> = ({ station, isGrid = false, isMini = false }) => {
         const color = station.color; const isVide = station.machine === 'VIDE'; const timeInSeconds = Math.round(station.totalTime * 60); const hasNotes = station.notes && station.notes.trim().length > 0; const hasOperator = station.operatorName && station.operatorName.trim().length > 0; const isOverridden = station.timeOverride !== undefined; const mySimIndex = station.index - 1; const isActive = !isMini && simStep === mySimIndex; const isPassed = simStep > mySimIndex; const isControl = station.machine.toUpperCase().includes('CONTROLE'); const isFer = station.machine.toUpperCase().includes('FER') || station.machine.toUpperCase().includes('REPASSAGE'); const isFinition = station.machine.toUpperCase().includes('FINITION'); const isBroken = station.notes?.includes('#PANNE');
-        let bodyBgClass = 'bg-white'; if (isControl) bodyBgClass = 'bg-orange-50'; if (isFer) bodyBgClass = 'bg-rose-50'; if (isFinition) bodyBgClass = 'bg-purple-50'; const isSpecial = isControl || isFer || isFinition;
-        const isFeeder = station.isFeeder; if (isFeeder) bodyBgClass = 'bg-blue-50/50';
+        let bodyBgClass = 'bg-white/10 backdrop-blur-sm'; if (isControl) bodyBgClass = 'bg-orange-50/30 backdrop-blur-sm'; if (isFer) bodyBgClass = 'bg-rose-50/30 backdrop-blur-sm'; if (isFinition) bodyBgClass = 'bg-purple-50/30 backdrop-blur-sm'; const isSpecial = isControl || isFer || isFinition;
+        const isFeeder = station.isFeeder; if (isFeeder) bodyBgClass = 'bg-blue-50/60';
         const isSwapSource = swapSourceId === station.id; const isSwapTarget = swapSourceId && swapSourceId !== station.id; const isLinkSource = linkSource === station.id; const isLinkTargetCandidate = isLinking && linkSource && linkSource !== station.id;
-        const cardHeightClass = isGrid ? 'min-h-[140px]' : (isMini ? 'min-h-[80px]' : 'h-full min-h-[140px]'); const cardWidthClass = isMini ? 'w-full' : (isGrid ? 'w-full' : 'w-44 sm:w-48 shrink-0'); const miniCardStyle = isMini ? `${color.bg} ${color.border} border-2` : `bg-white border-2`; const cursorClass = (canEdit && isManualMode && !swapSourceId && !isLinking && !isSpacePressed) ? 'cursor-move' : 'cursor-default';
+        const cardHeightClass = isGrid ? 'min-h-[140px]' : (isMini ? 'min-h-[80px]' : 'h-full min-h-[140px]'); const cardWidthClass = isMini ? 'w-full' : (isGrid ? 'w-full' : 'w-44 sm:w-48 shrink-0'); const miniCardStyle = isMini ? `${color.bg} ${color.border} border-2` : `bg-white/40 backdrop-blur-md border-2 ${color.border}`; const cursorClass = (canEdit && isManualMode && !swapSourceId && !isLinking && !isSpacePressed) ? 'cursor-move' : 'cursor-default';
 
         // MODIFIED: Make Vide slots behave like normal cards in auto/free modes (draggable, context menu)
         if (isVide && !isMini) {
@@ -1825,6 +2219,7 @@ export default function Implantation({
                     {/* Delete Button for Free Mode */}
                     {layoutType === 'free' && (
                         <button
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => { e.stopPropagation(); handleRemoveFromCanvas(station.id); }}
                             className="absolute top-2 right-2 p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                         >
@@ -1837,30 +2232,49 @@ export default function Implantation({
 
         return (
             <div
-                id={isMini ? `station-card-mini-${station.id}` : `station-card-${station.id}`}
+                id={isMini ? `station-card-mini-${station.id}` : (layoutType === 'free' ? `inner-card-${station.id}` : `station-card-${station.id}`)}
                 onClick={() => handleStationClick(station)}
                 onContextMenu={(e) => { handleContextMenu(e, station); }}
                 onDoubleClick={(e) => handleOpenEditModal(e, station)}
                 draggable={canEdit && isManualMode && !swapSourceId && !isLinking && layoutType !== 'free' && !isSpacePressed}
-                onDragStart={(e) => handleDragStart(e, station.originalIndex, isMini, station.id)}
+                onDragStart={(e) => {
+                    if (layoutType === 'free') {
+                        e.preventDefault();
+                        return;
+                    }
+                    handleDragStart(e, station.originalIndex, isMini, station.id);
+                }}
                 onDragEnd={() => setDraggedStationIdx(null)}
                 onDragOver={handleDragOver}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(e, station.originalIndex); }}
-                // Added z-10 and relative positioning to ensure cards are above the SVG lines
-                className={`relative rounded-xl overflow-hidden group shadow-sm z-10 bg-white ${cardWidthClass} ${cardHeightClass} ${canEdit && isManualMode && !isLinking && layoutType !== 'free' && !isSpacePressed ? 'hover:-translate-y-1 hover:shadow-lg' : ''} ${cursorClass} ${isActive ? 'ring-4 ring-emerald-400 border-emerald-500 scale-105 shadow-xl z-20' : isLinkSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-20 animate-pulse' : isLinkTargetCandidate ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isSwapSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-20' : isSwapTarget ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isPassed ? 'border-emerald-200 opacity-90' : (isMini ? color.border : color.border)} ${isBroken ? 'ring-2 ring-rose-500 border-rose-600 bg-rose-50' : ''} ${miniCardStyle} transition-all duration-300 flex flex-col select-none`}
+                // Added z-10 and relative positioning to ensure cards are above the SVG lines. Added glassmorphism classes.
+                className={`relative rounded-xl overflow-hidden group shadow-[0_4px_16px_rgb(0,0,0,0.03)] z-10 ${cardWidthClass} ${cardHeightClass} ${canEdit && isManualMode && !isLinking && layoutType !== 'free' && !isSpacePressed ? 'hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]' : ''} ${cursorClass} ${isActive ? 'ring-4 ring-emerald-400 border-emerald-500 scale-105 shadow-xl z-20' : isLinkSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-20 animate-pulse' : isLinkTargetCandidate ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isSwapSource ? 'ring-4 ring-indigo-500 border-indigo-600 scale-105 shadow-xl z-20' : isSwapTarget ? 'cursor-pointer hover:ring-4 hover:ring-indigo-300 hover:border-indigo-400' : isPassed ? 'border-emerald-200 opacity-90' : (isMini ? color.border : color.border)} ${isBroken ? 'ring-2 ring-rose-500 border-rose-600 bg-rose-50/90' : ''} ${miniCardStyle} transition-all duration-300 flex flex-col select-none`}
             >
                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isActive ? 'bg-emerald-500' : (isBroken ? 'bg-rose-500' : color.fill)}`}></div>
-                <div className={`px-2 pl-3 py-1.5 flex justify-between items-center ${isActive ? 'bg-emerald-500' : (isPassed ? 'bg-emerald-50' : (isMini ? color.bg : color.bg))} border-b ${isActive ? 'border-emerald-600' : color.border} transition-colors duration-500 relative`}>
+                <div className={`px-2 pl-3 py-1.5 flex justify-between items-center ${isActive ? 'bg-emerald-500/90 ' : (isPassed ? 'bg-emerald-50/90 ' : (isMini ? color.bg : color.bg + '/90 '))} border-b ${isActive ? 'border-emerald-600' : color.border} transition-colors duration-500 relative`}>
                     {isOverridden && <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-purple-500 ring-1 ring-white animate-pulse" title="Temps Forcé"></div>}
                     {isBroken && <div className="absolute top-1 right-3 w-3 h-3 text-rose-600 animate-pulse"><AlertTriangle className="w-3 h-3 fill-current" /></div>}
                     <div className="flex items-center gap-1.5">
-                        <span className={`text-[10px] font-black ${isActive ? 'text-emerald-600 bg-white' : color.text} w-5 h-5 flex items-center justify-center bg-white rounded-md shadow-sm border border-black/5`}> {station.name.replace('P', '').split('.')[0]} </span>
+                        <span className={`text-[10px] font-black ${isActive ? 'text-emerald-600 bg-white/60' : color.text} w-5 h-5 flex items-center justify-center bg-white/40 rounded-md shadow-sm border border-black/5`}> {station.name.replace('P', '').split('.')[0]} </span>
                         <span className={`text-[9px] font-black uppercase truncate max-w-[80px] ${isActive ? 'text-white' : color.text}`} title={station.name}> {station.machine} </span>
                     </div>
+
+                    {/* SECTION BADGE */}
+                    {station.dominantSection === 'PREPARATION' && (
+                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[8px] font-black px-2 py-0.5 rounded-sm shadow-sm uppercase tracking-widest z-30 border border-amber-600">
+                            PRÉP
+                        </div>
+                    )}
+                    {station.dominantSection === 'MONTAGE' && (
+                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-sky-500 text-white text-[8px] font-black px-2 py-0.5 rounded-sm shadow-sm uppercase tracking-widest z-30 border border-sky-600">
+                            MONTAGE
+                        </div>
+                    )}
 
                     {/* DELETE LINK BUTTON ON CARD */}
                     {showLinks && manualLinks && manualLinks.some(l => l.from === station.id || l.to === station.id) && (
                         <button
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 const linkToDelete = manualLinks.find(l => l.from === station.id || l.to === station.id);
@@ -1877,6 +2291,7 @@ export default function Implantation({
                         <div className="ml-auto mr-1 flex items-center gap-1">
                             {isManualMode && (
                                 <button
+                                    onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => { e.stopPropagation(); handleRemoveFromCanvas(station.id); }}
                                     className="p-1 rounded-md bg-white/20 hover:bg-rose-100 hover:text-rose-600 text-current transition-colors opacity-0 group-hover:opacity-100 z-50"
                                     title="Retirer du plan"
@@ -1885,6 +2300,7 @@ export default function Implantation({
                                 </button>
                             )}
                             <button
+                                onMouseDown={(e) => e.stopPropagation()}
                                 onClick={(e) => handleContextMenu(e, station)}
                                 className="p-1 rounded-md bg-white/20 hover:bg-white/40 text-current transition-colors"
                             >
@@ -1895,13 +2311,13 @@ export default function Implantation({
 
                     {!isMini && (<div className="flex items-center gap-0.5"> {isFeeder && <div title={`Alimente: ${station.targetStationName || 'Poste Suivant'}`}><GitMerge className={`w-3 h-3 ${isActive ? 'text-white' : 'text-blue-500'}`} /></div>} {hasOperator && <div title={station.operatorName}><User className={`w-3 h-3 ${isActive ? 'text-white' : 'text-slate-400'}`} /></div>} {hasNotes && <div title="Notes"><FileText className={`w-3 h-3 ${isActive ? 'text-yellow-300' : 'text-amber-400'}`} /></div>} </div>)}
                 </div>
-                <div className={`p-2 pl-3 flex-1 flex flex-col justify-between gap-1 ${isMini ? 'bg-white' : bodyBgClass}`}> {station.groups && station.groups.length > 0 && !isMini && (<div className="flex flex-wrap gap-1 mb-1"> {station.groups.slice(0, 2).map(grp => (<span key={grp} className="text-[7px] font-black uppercase text-indigo-600 bg-indigo-100 px-1 py-0.5 rounded border border-indigo-200 truncate max-w-full"> {grp} </span>))} {station.groups.length > 2 && <span className="text-[7px] text-slate-400">+{station.groups.length - 2}</span>} </div>)} <div className="space-y-1"> {station.operations.length > 0 ? (<> {station.operations.slice(0, isMini ? 100 : 3).map((op, i) => { const groupStyle = op.groupId ? getGroupStyle(op.groupId) : null; return (<div key={i} className={`flex justify-between items-center gap-1.5 py-0.5 ${groupStyle && isMini ? groupStyle.bg + ' px-1.5 rounded-md -mx-1.5 my-0.5 border border-transparent hover:border-indigo-200' : ''}`}> <span className={`font-mono text-[9px] font-bold px-1 rounded border shrink-0 ${groupStyle && isMini ? 'bg-white/50 border-transparent ' + groupStyle.text : 'bg-slate-50 text-slate-400 border-slate-100'}`}> {op.order} </span> <div className={`text-[9px] font-bold leading-tight line-clamp-2 flex-1 ${groupStyle && isMini ? groupStyle.text : 'text-slate-600'}`} title={op.description}> {op.description} </div> {groupStyle && isMini && <LinkIcon className={`w-2.5 h-2.5 shrink-0 ${groupStyle.text}`} />} </div>) })} {station.operations.length > (isMini ? 100 : 3) && <div className="text-[8px] text-slate-400 italic font-medium">... +{station.operations.length - (isMini ? 100 : 3)}</div>} </>) : (<div className={`text-[9px] italic flex items-center justify-center ${isMini ? 'h-8' : 'h-12'} ${isOverridden ? 'text-purple-500 font-bold' : (isSpecial ? 'text-slate-400/70' : 'text-slate-300')}`}> {isOverridden ? 'Temps Forcé' : 'Vide'} </div>)} </div> <div className="flex items-center justify-between mt-auto pt-1.5 border-t border-slate-100"> <div className="flex flex-col"> <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider">Total</span> <span className={`text-sm font-bold ${isActive ? 'text-emerald-600' : (isOverridden ? 'text-purple-600' : color.text)}`}>{timeInSeconds}s</span> </div> <div className="flex flex-col items-end"> <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider">Sat.</span> <div className="flex items-center gap-1"> {station.operators > 1 && <span className={`text-[9px] font-black px-1 rounded bg-amber-100 text-amber-700`}>x{station.operators}</span>} <span className={`text-[9px] font-black ${station.saturation > 100 ? 'text-rose-500' : 'text-emerald-500'}`}>{Math.round(station.saturation)}%</span> </div> </div> </div> </div> <div className="absolute bottom-0 left-0 h-1 bg-slate-200 w-full"> <div className={`h-full ${isActive ? 'bg-emerald-400' : (isFer ? 'bg-rose-500' : (isControl ? 'bg-orange-500' : (isFinition ? 'bg-purple-500' : color.fill)))}`} style={{ width: `${Math.min(station.saturation, 100)}%` }}></div> </div> </div>);
+                <div className={`p-2 pl-3 flex-1 flex flex-col justify-between gap-1 ${isMini ? 'bg-transparent' : bodyBgClass}`}> {station.groups && station.groups.length > 0 && !isMini && (<div className="flex flex-wrap gap-1 mb-1"> {station.groups.slice(0, 2).map(grp => (<span key={grp} className="text-[7px] font-black uppercase text-indigo-600 bg-indigo-100 px-1 py-0.5 rounded border border-indigo-200 truncate max-w-full"> {grp} </span>))} {station.groups.length > 2 && <span className="text-[7px] text-slate-400">+{station.groups.length - 2}</span>} </div>)} <div className="space-y-1"> {station.operations.length > 0 ? (<> {station.operations.slice(0, isMini ? 100 : 3).map((op, i) => { const groupStyle = op.groupId ? getGroupStyle(op.groupId) : null; return (<div key={i} className={`flex justify-between items-center gap-1.5 py-0.5 ${groupStyle && isMini ? groupStyle.bg + ' px-1.5 rounded-md -mx-1.5 my-0.5 border border-transparent hover:border-indigo-200' : ''}`}> <span className={`font-mono text-[9px] font-bold px-1 rounded border shrink-0 ${groupStyle && isMini ? 'bg-transparent border-transparent ' + groupStyle.text : 'bg-transparent text-slate-400 border-slate-200'}`}> {op.order} </span> <div className={`text-[9px] font-bold leading-tight line-clamp-2 flex-1 ${groupStyle && isMini ? groupStyle.text : 'text-slate-600'}`} title={op.description}> {op.description} </div> {groupStyle && isMini && <LinkIcon className={`w-2.5 h-2.5 shrink-0 ${groupStyle.text}`} />} </div>) })} {station.operations.length > (isMini ? 100 : 3) && <div className="text-[8px] text-slate-400 italic font-medium">... +{station.operations.length - (isMini ? 100 : 3)}</div>} </>) : (<div className={`text-[9px] italic flex items-center justify-center ${isMini ? 'h-8' : 'h-12'} ${isOverridden ? 'text-purple-500 font-bold' : (isSpecial ? 'text-slate-400/70' : 'text-slate-300')}`}> {isOverridden ? 'Temps Forcé' : 'Vide'} </div>)} </div> <div className="flex items-center justify-between mt-auto pt-1.5 border-t border-slate-100"> <div className="flex flex-col"> <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider">Total</span> <span className={`text-sm font-bold ${isActive ? 'text-emerald-600' : (isOverridden ? 'text-purple-600' : color.text)}`}>{timeInSeconds}s</span> </div> <div className="flex flex-col items-end"> <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider">Sat.</span> <div className="flex items-center gap-1"> {station.operators > 1 && <span className={`text-[9px] font-black px-1 rounded bg-amber-100 text-amber-700`}>x{station.operators}</span>} <span className={`text-[9px] font-black ${station.saturation > 100 ? 'text-rose-500' : 'text-emerald-500'}`}>{Math.round(station.saturation)}%</span> </div> </div> </div> </div> <div className="absolute bottom-0 left-0 h-1 bg-slate-200 w-full"> <div className={`h-full ${isActive ? 'bg-emerald-400' : (isFer ? 'bg-rose-500' : (isControl ? 'bg-orange-500' : (isFinition ? 'bg-purple-500' : color.fill)))}`} style={{ width: `${Math.min(station.saturation, 100)}%` }}></div> </div> </div>);
     };
 
     return (
         <div className="flex flex-col h-full gap-2 relative">
             {/* ... (Header Stats - UNCHANGED) ... */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-2 p-2 flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+            <div className="bg-slate-50/80 rounded-xl border-2 border-slate-200 shadow-sm mb-2 p-2 flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
                 {/* OUVRIERS / HEURES */}
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-100 shrink-0">
                     <div className="flex flex-col items-center border-r border-slate-200 pr-3 mr-3">
@@ -1960,278 +2376,296 @@ export default function Implantation({
                     </div>
                 </div>
 
-                {/* T. ARTICLE */}
-                <div className="ml-auto px-4 py-1.5 bg-purple-100 rounded-lg border border-purple-200 flex flex-col items-end shrink-0">
-                    <span className="text-[9px] font-bold text-purple-500 uppercase flex items-center gap-1"><Timer className="w-3 h-3" /> T. Article</span>
-                    <span className="font-black text-purple-700 text-xl leading-none">{tempsArticle.toFixed(2)}</span>
+                {/* T. ARTICLE (Split View) */}
+                <div className="ml-auto flex items-stretch gap-2 shrink-0">
+                    {useMemo(() => {
+                        const prepMin = operations.filter(op => op.section === 'PREPARATION').reduce((sum, op) => sum + (op.time || 0), 0) * 1.2;
+                        const montMin = operations.filter(op => op.section === 'MONTAGE').reduce((sum, op) => sum + (op.time || 0), 0) * 1.2;
+                        return (
+                            <>
+                                {prepMin > 0 && (
+                                    <div className="px-3 py-1.5 bg-amber-50 rounded-lg border border-amber-200 flex flex-col items-end">
+                                        <span className="text-[9px] font-bold text-amber-600 uppercase">Préparation</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-black text-amber-700 text-lg leading-none">{prepMin.toFixed(2)}</span>
+                                            {preparationMetrics?.hourly && <span className="text-[10px] bg-amber-200/50 px-1 rounded text-amber-800 font-bold">Obj: {preparationMetrics.hourly}/h</span>}
+                                        </div>
+                                    </div>
+                                )}
+                                {montMin > 0 && (
+                                    <div className="px-3 py-1.5 bg-sky-50 rounded-lg border border-sky-200 flex flex-col items-end">
+                                        <span className="text-[9px] font-bold text-sky-600 uppercase">Montage</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-black text-sky-700 text-lg leading-none">{montMin.toFixed(2)}</span>
+                                            {montageMetrics?.hourly && <span className="text-[10px] bg-sky-200/50 px-1 rounded text-sky-800 font-bold">Obj: {montageMetrics.hourly}/h</span>}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        );
+                    }, [operations, preparationMetrics, montageMetrics])}
+                    <div className="px-4 py-1.5 bg-purple-100 rounded-lg border border-purple-200 flex flex-col items-end shrink-0">
+                        <span className="text-[9px] font-bold text-purple-500 uppercase flex items-center gap-1"><Timer className="w-3 h-3" /> T. Global</span>
+                        <span className="font-black text-purple-700 text-xl leading-none">{tempsArticle.toFixed(2)}</span>
+                    </div>
                 </div>
             </div>
 
             {/* FULLSCREEN WRAPPER */}
-            <div ref={fullscreenWrapperRef} className={`flex flex-col flex-1 min-h-0 relative transition-all duration-300 ${isFullScreen ? 'bg-white p-4 overflow-hidden fixed inset-0 z-[5000]' : ''}`}>
+            <div ref={fullscreenWrapperRef} className={`flex flex-col flex-1 min-h-0 w-full h-full relative transition-[background-color] duration-500 ${isFullScreen ? 'bg-[#F8FAFC]' : 'bg-transparent'}`}>
+                <div className={`flex flex-col flex-1 min-h-0 h-full w-full ${isFullScreen ? 'animate-in fade-in duration-700 ease-out' : ''}`}>
 
 
 
-                {/* TOOLBAR (CLEANED UP & ORGANIZED) */}
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap items-center justify-between gap-4 shrink-0 z-30 mb-2 mt-4 relative">
+                    {/* TOOLBAR */}
+                    <div className="bg-slate-50/80 rounded-2xl border-2 border-slate-200 shadow-sm p-2.5 flex flex-wrap items-center gap-2 shrink-0 z-30 mb-2 mt-4 relative">
 
-                    {/* LEFT: Modes & Auto Refresh */}
-                    <div className="flex items-center gap-3">
-                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
-                            <button
-                                onClick={activateAutoMode}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-sm ${!isManualMode ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-                            >
-                                <Bot className="w-4 h-4" /> <span className="hidden lg:inline">Mode Auto</span><span className="lg:hidden">Auto</span>
+                        {/* Mode Toggle */}
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                            <button onClick={activateAutoMode} className={`flex items-center justify-center px-3 py-1.5 rounded-md font-bold transition-all text-xs ${!isManualMode ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                                Auto
                             </button>
-                            <button
-                                onClick={activateManualMode}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition-all text-sm ${isManualMode ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-                            >
-                                <Hand className="w-4 h-4" /> <span className="hidden lg:inline">Mode Manuel</span><span className="lg:hidden">Manuel</span>
+                            <button onClick={activateManualMode} className={`flex items-center justify-center px-3 py-1.5 rounded-md font-bold transition-all text-xs ${isManualMode ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                                Manuel
                             </button>
                         </div>
 
-                        {!isManualMode && (
-                            <button onClick={refreshAuto} title="Actualiser la distribution" className="flex items-center justify-center p-3 bg-emerald-50/80 border border-emerald-200 text-emerald-600 font-bold rounded-xl hover:bg-emerald-100 transition-colors shadow-sm active:scale-95">
-                                <RefreshCw className="w-4 h-4" />
-                            </button>
-                        )}
+                        <div className="w-px h-7 bg-slate-200" />
 
-                        {isManualMode && (
-                            <div className="flex items-center bg-slate-50 p-1 rounded-xl border border-slate-200">
-                                <button onClick={addSingleEmptySlot} className="p-2 text-slate-500 hover:text-emerald-600 transition-colors" title="Ajouter Poste Vide"><Plus className="w-4 h-4" /></button>
-                                <div className="w-px h-6 bg-slate-200 mx-1"></div>
-                                <button onClick={compactPostes} className="p-2 text-slate-500 hover:text-blue-600 transition-colors" title="Compacter"><Maximize2 className="w-4 h-4" /></button>
-                            </div>
-                        )}
-                    </div>
+                        {/* Layout Picker */}
+                        <div className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
+                            {[
+                                { id: 'line', label: '2 Lignes', icon: Columns },
+                                { id: 'double-zigzag', label: 'Zigzag', icon: ArrowLeftRight },
+                                ...(isManualMode ? [{ id: 'free', label: 'Libre', icon: Move }] : []),
+                            ].map((item) => (
+                                <button key={item.id} onClick={() => handleLayoutChange(item.id as any)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-bold transition-all whitespace-nowrap ${layoutType === item.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100 hover:text-indigo-600'}`}>
+                                    <item.icon className="w-3.5 h-3.5" />
+                                    <span className="hidden xl:inline">{item.label}</span>
+                                </button>
+                            ))}
+                        </div>
 
-                    {/* CENTER: Layout Styles */}
-                    <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 shadow-inner overflow-x-auto no-scrollbar">
-                        {[
-                            { id: 'zigzag', label: 'U (Lignes)', icon: LayoutDashboard },
-                            { id: 'line', label: 'Ligne', icon: AlignHorizontalSpaceAround },
-                            { id: 'free', label: 'Libre', icon: Move },
-                        ].map((item) => (
-                            <button
-                                key={item.id}
-                                onClick={() => handleLayoutChange(item.id as any)}
-                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${layoutType === item.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-indigo-600'}`}
-                            >
-                                <item.icon className="w-4 h-4" />
-                                <span className="hidden xl:inline">{item.label}</span>
-                            </button>
-                        ))}
-                    </div>
+                        <div className="w-px h-7 bg-slate-200" />
 
-                    {/* RIGHT: Actions (Free mode tools + Export) */}
-                    <div className="flex items-center gap-3">
+                        {/* Zoom Controls */}
+                        <div className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
+                            <button onClick={() => setZoom(z => Math.max(0.3, z - 0.1))} className="p-1.5 text-slate-500 hover:text-indigo-600 rounded-md hover:bg-slate-100 transition-colors" title="Zoom -"><ZoomOut className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setZoom(1)} className="px-2 py-1 text-[10px] font-black text-slate-600 hover:text-indigo-600 rounded-md hover:bg-slate-100 transition-colors min-w-[40px] text-center" title="Réinitialiser Zoom">{Math.round(zoom * 100)}%</button>
+                            <button onClick={() => setZoom(z => Math.min(2, z + 0.1))} className="p-1.5 text-slate-500 hover:text-indigo-600 rounded-md hover:bg-slate-100 transition-colors" title="Zoom +"><ZoomIn className="w-3.5 h-3.5" /></button>
+                        </div>
+
+                        {/* Free Mode Tools */}
                         {isManualMode && layoutType === 'free' && (
-                            <div className="hidden lg:flex items-center bg-violet-50 p-1 rounded-xl border border-violet-200 shadow-inner">
-                                <span className="text-[10px] font-black tracking-wider text-violet-400 px-2 uppercase">Assistant</span>
-                                <button onClick={() => applyLayoutPattern('U')} className="p-2 rounded-lg text-violet-600 hover:bg-white transition-colors" title="Forme U"><Columns className="w-4 h-4" /></button>
-                                <button onClick={() => applyLayoutPattern('CIRCLE')} className="p-2 rounded-lg text-violet-600 hover:bg-white transition-colors" title="Cercle"><CircleDashed className="w-4 h-4" /></button>
-                            </div>
+                            <>
+                                <div className="w-px h-7 bg-slate-200" />
+                                <div className="flex items-center gap-0.5 bg-violet-50 p-0.5 rounded-lg border border-violet-200">
+                                    <button onClick={() => applyLayoutPattern('U')} className="p-1.5 rounded-md text-violet-600 hover:bg-slate-100 transition-colors" title="Disposition U"><Columns className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => applyLayoutPattern('GRID')} className="p-1.5 rounded-md text-violet-600 hover:bg-slate-100 transition-colors" title="Grille"><LayoutGrid className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => applyLayoutPattern('CIRCLE')} className="p-1.5 rounded-md text-violet-600 hover:bg-slate-100 transition-colors" title="Cercle"><CircleDashed className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => applyLayoutPattern('LINE')} className="p-1.5 rounded-md text-violet-600 hover:bg-slate-100 transition-colors" title="Ligne droite"><ArrowRight className="w-3.5 h-3.5" /></button>
+                                </div>
+                            </>
                         )}
 
-                        {/* --- NEW: MAGNETIC SNAP TOGGLE --- */}
-                        {isManualMode && layoutType === 'free' && (
-                            <button
-                                onClick={toggleMagnetic}
-                                title="Alignement Magnétique"
-                                className={`flex items-center justify-center p-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isMagnetic ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:text-indigo-600 active:scale-95'}`}
-                            >
-                                <Magnet className={`w-5 h-5 ${isMagnetic ? 'rotate-180 drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]' : ''} transition-transform duration-300`} />
+                        {/* Station Counter Badge */}
+                        <div className="w-px h-7 bg-slate-200" />
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 rounded-lg border border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wide">
+                            <Layers className="w-3.5 h-3.5" />
+                            <span className="text-indigo-600">{workstations.filter(s => s.machine !== 'VIDE').length}</span>
+                            <span>postes</span>
+                            {isManualMode && waitingStations.length > 0 && (
+                                <span className="text-amber-500 ml-0.5">({waitingStations.length} en attente)</span>
+                            )}
+                        </div>
+
+                        {/* Spacer */}
+                        <div className="flex-1" />
+
+                        {/* Right Actions */}
+                        <div className="flex items-center gap-1.5">
+                            <button onClick={() => { activateManualMode(); if (setPostes && postes) { setPostes(postes.map(p => ({ ...p, isPlaced: false, x: undefined, y: undefined }))); } }} className="p-1.5 rounded-lg bg-slate-50 text-rose-400 border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors flex items-center gap-1" title="Vider tout le plan (basculer en mode libre)">
+                                <Trash2 className="w-4 h-4" />
+                                <span className="text-[10px] uppercase font-black tracking-wider hidden xl:inline">Vider</span>
                             </button>
-                        )}
-
-                        {isManualMode && (
-                            <button onClick={() => setIsLinking(!isLinking)} title="Mode Liaison (Flux)" className={`flex items-center justify-center p-2 rounded-xl font-bold text-sm transition-all shadow-sm ${isLinking ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:text-indigo-600 active:scale-95'}`}>
-                                <MousePointerClick className="w-5 h-5" />
-                            </button>
-                        )}
-
-                        <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 shadow-inner">
-                            {/* Materials Panel Toggle (Machine Counter) */}
-                            <button onClick={() => setShowMaterialsPanel(!showMaterialsPanel)} className={`p-2 rounded-lg transition-colors shadow-sm ${showMaterialsPanel ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 hover:text-indigo-600 border border-slate-100'}`} title="Compteur de machines">
+                            {isManualMode && (
+                                <button onClick={renumberStations} className="p-1.5 rounded-lg bg-slate-50 text-slate-400 border border-slate-200 hover:text-indigo-600 hover:border-indigo-200 transition-colors" title="Renuméroter P1, P2, P3...">
+                                    <ListOrdered className="w-4 h-4" />
+                                </button>
+                            )}
+                            {isManualMode && (
+                                <button onClick={restoreGammeOrder} className="p-1.5 rounded-lg bg-slate-50 text-slate-400 border border-slate-200 hover:text-indigo-600 hover:border-indigo-200 transition-colors" title="Remettre les postes selon l'ordre de la gamme">
+                                    <ArrowDownToLine className="w-4 h-4" />
+                                </button>
+                            )}
+                            <button onClick={() => setShowMaterialsPanel(!showMaterialsPanel)} className={`p-1.5 rounded-lg transition-colors ${showMaterialsPanel ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-400 border border-slate-200 hover:text-indigo-600'}`} title="Compteur Machines">
                                 <Calculator className="w-4 h-4" />
                             </button>
-
-                            {/* Load / Save Layout History */}
-                            <button onClick={() => setShowLoadTemplateModal(true)} className="p-2 rounded-lg bg-white text-slate-500 hover:text-indigo-600 border border-slate-100 transition-colors shadow-sm" title="Ouvrir un plan sauvegardé">
+                            <button onClick={() => setShowLoadTemplateModal(true)} className="p-1.5 rounded-lg bg-slate-50 text-slate-400 border border-slate-200 hover:text-indigo-600 transition-colors" title="Charger un plan">
                                 <FolderOpen className="w-4 h-4" />
                             </button>
-                            <button onClick={() => setShowSaveTemplateModal(true)} className="p-2 rounded-lg bg-white text-slate-500 hover:text-emerald-600 border border-slate-100 transition-colors shadow-sm" title="Sauvegarder le plan actuel">
+                            <button onClick={() => setShowSaveTemplateModal(true)} className="p-1.5 rounded-lg bg-slate-50 text-slate-400 border border-slate-200 hover:text-emerald-600 transition-colors" title="Sauvegarder le plan">
                                 <Save className="w-4 h-4" />
                             </button>
+                            <button onClick={toggleFullScreen} className="p-1.5 rounded-lg bg-slate-50 text-slate-400 border border-slate-200 hover:text-indigo-600 transition-colors" title={isFullScreen ? "Quitter plein écran (Esc/F)" : "Plein écran (F)"}>
+                                {isFullScreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                            </button>
 
-                            {/* Clear Canvas Button for Free Mode */}
-                            {isManualMode && layoutType === 'free' && (
-                                <button
-                                    onClick={() => {
-                                        if (confirm("Voulez-vous vraiment effacer le plan libre ? Tous les postes retourneront dans la file d'attente.")) {
-                                            setPostes(prev => prev.map(p => ({ ...p, isPlaced: false, x: undefined, y: undefined })));
-                                            if (setManualLinks) setManualLinks([]);
-                                        }
-                                    }}
-                                    className="p-2 rounded-lg bg-white text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 transition-colors shadow-sm"
-                                    title="Effacer le plan"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            )}
+                            <div className="w-px h-7 bg-slate-200" />
 
-                            <button onClick={handleExportPlan} className="px-3 py-2 bg-white rounded-lg flex items-center gap-2 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-100 transition-colors shadow-sm text-slate-700 text-xs font-bold whitespace-nowrap">
-                                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />} <span className="hidden sm:inline">Exporter</span>
+                            <button onClick={handleExportPlan} className="px-3 py-1.5 bg-slate-50 rounded-lg flex items-center gap-1.5 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors text-slate-600 text-xs font-bold whitespace-nowrap">
+                                {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />} Imprimer
                             </button>
                             {onSave && (
-                                <button onClick={() => { onSave(); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 2500); }} className="px-3 py-2 bg-slate-800 text-white rounded-lg flex items-center gap-2 border border-slate-700 hover:bg-emerald-600 hover:border-emerald-600 transition-colors shadow-sm text-xs font-bold whitespace-nowrap active:scale-95">
-                                    {saveSuccess ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />} <span className="hidden sm:inline">{saveSuccess ? 'Sauvé' : 'Sauver'}</span>
+                                <button onClick={() => { onSave(); setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 2500); }} className="px-3 py-1.5 bg-slate-800 text-white rounded-lg flex items-center gap-1.5 border border-slate-700 hover:bg-emerald-600 hover:border-emerald-600 transition-colors text-xs font-bold whitespace-nowrap active:scale-95">
+                                    {saveSuccess ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />} {saveSuccess ? 'Sauvé !' : 'Sauver'}
                                 </button>
                             )}
                         </div>
                     </div>
-                </div>
 
-                {/* LINKING MODE BANNER */}
-                {isLinking && (
-                    <div className="bg-indigo-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-md mb-2 rounded-lg animate-in slide-in-from-top-2 z-20">
-                        <div className="flex items-center gap-2">
-                            <MousePointerClick className="w-4 h-4 text-indigo-200" />
-                            <span>Mode Liaison : {linkSource ? "Sélectionnez la destination..." : "Sélectionnez le poste de départ"}</span>
-                        </div>
-                        <button
-                            onClick={() => { setIsLinking(false); setLinkSource(null); }}
-                            className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-md text-[10px] transition-colors"
-                        >
-                            Terminer
-                        </button>
-                    </div>
-                )}
-
-                {/* SWAP MODE BANNER */}
-                {swapSourceId && !isLinking && (
-                    <div className="bg-orange-500 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-md mb-2 rounded-lg animate-in slide-in-from-top-2 z-20">
-                        <div className="flex items-center gap-2">
-                            <SwapIcon className="w-4 h-4" />
-                            <span>Mode Échange Actif : Sélectionnez le poste cible pour échanger.</span>
-                        </div>
-                        <button
-                            onClick={() => setSwapSourceId(null)}
-                            className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-md text-[10px] transition-colors"
-                        >
-                            Annuler
-                        </button>
-                    </div>
-                )}
-
-                {/* 2. ZONES INDICATOR - UNCHANGED */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-1.5 flex items-center gap-1 overflow-x-auto text-[10px] font-bold uppercase text-slate-400 shadow-inner shrink-0 mb-1">
-                    <div className="flex items-center gap-2 px-2 py-0.5 bg-white rounded-lg border border-slate-200 opacity-60 shrink-0"><Package className="w-3 h-3 text-slate-400" /> Stock Tissu</div><ArrowRight className="w-3 h-3 text-slate-300 shrink-0" /><div className="flex items-center gap-2 px-2 py-0.5 bg-white rounded-lg border border-slate-200 opacity-60 shrink-0"><Scissors className="w-3 h-3 text-slate-400" /> Coupe & Prep</div><ArrowRight className="w-3 h-3 text-emerald-400 shrink-0" /><div className="flex items-center gap-2 px-2 py-0.5 bg-emerald-50 rounded-lg border border-emerald-200 text-emerald-700 shadow-sm shrink-0"><Layers className="w-3 h-3" /> Montage (Atelier)</div><ArrowRight className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <div className="flex items-center gap-3">
-                        {swapControlFinition ? (
-                            <>
-                                <SpecialZoneControl label="Contrôle" type="CONTROLE" icon={Eye} color={{ bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', hoverBg: 'hover:bg-orange-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('CONTROLE')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
-                                <button onClick={handleSwapZones} className="p-1 hover:bg-slate-200 rounded-full transition-colors shrink-0 transform active:rotate-180 duration-300" title="Inverser ordre"><ArrowRightLeft className="w-3 h-3 text-slate-400" /></button>
-                                <SpecialZoneControl label="Finition" type="FINITION" icon={Sparkles} color={{ bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', hoverBg: 'hover:bg-purple-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('FINITION')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
-                            </>
-                        ) : (
-                            <>
-                                <SpecialZoneControl label="Finition" type="FINITION" icon={Sparkles} color={{ bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', hoverBg: 'hover:bg-purple-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('FINITION')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
-                                <button onClick={handleSwapZones} className="p-1 hover:bg-slate-200 rounded-full transition-colors shrink-0 transform active:rotate-180 duration-300" title="Inverser ordre"><ArrowRightLeft className="w-3 h-3 text-slate-400" /></button>
-                                <SpecialZoneControl label="Contrôle" type="CONTROLE" icon={Eye} color={{ bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', hoverBg: 'hover:bg-orange-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('CONTROLE')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
-                            </>
-                        )}
-                    </div>
-                    <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" /><div className="flex items-center gap-2 px-2 py-0.5 bg-white rounded-lg border border-slate-200 opacity-60 shrink-0"><Truck className="w-3 h-3 text-slate-400" /> Expédition</div>
-                </div>
-
-                {/* 3. CANVAS (With Wrapper & Styles for Scrollbars) */}
-                <div className="flex-1 flex gap-4 min-h-0 relative h-full">
-
-                    {/* MINI-GAMME SIDEBAR (VISIBLE IN MANUAL MODE) - RESPONSIVE (DRAWER ON MOBILE) */}
-                    {isManualMode && (
-                        <>
-                            {/* Mobile Backdrop */}
-                            <div
-                                className={`lg:hidden fixed inset-0 bg-black/20 z-20 transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-                                onClick={() => setIsSidebarOpen(false)}
-                            />
-
-                            <div className={`absolute lg:relative h-full bg-white border-r border-slate-200 shadow-xl z-30 flex flex-col transition-all duration-300 ease-in-out shrink-0 ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full lg:w-8 lg:translate-x-0'}`}>
-                                {/* Toggle Button - Repositioned for Mobile vs Desktop */}
-                                <button
-                                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                                    className={`absolute -right-3 top-4 bg-white border border-slate-200 text-slate-500 rounded-full p-1 shadow-md hover:text-indigo-600 z-50 transition-transform active:scale-95 ${!isSidebarOpen && window.innerWidth < 1024 ? 'hidden' : ''}`}
-                                >
-                                    {isSidebarOpen ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                                </button>
-
-                                {/* Mobile Open Button (When Closed) */}
-                                {!isSidebarOpen && (
-                                    <button
-                                        onClick={() => setIsSidebarOpen(true)}
-                                        className="lg:hidden absolute top-4 left-4 z-20 bg-white p-2 rounded-lg shadow-md border border-slate-200 text-indigo-600"
-                                    >
-                                        <Menu className="w-5 h-5" />
-                                    </button>
-                                )}
-
-                                {/* Sidebar Content (Visible when open) */}
-                                <div className={`flex-1 flex flex-col overflow-hidden transition-opacity duration-200 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none invisible'}`}>
-                                    <div className="p-3 border-b border-slate-200 bg-white flex justify-between items-center">
-                                        <div>
-                                            <h3 className="font-bold text-xs uppercase text-slate-500 flex items-center gap-2">
-                                                <Inbox className="w-4 h-4" /> Gamme d'attente
-                                            </h3>
-                                            <p className="text-[9px] text-slate-400 mt-0.5">Glissez vers la zone</p>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => setGroupDragMode(!groupDragMode)}
-                                                className={`p-1.5 rounded-md transition-colors border ${groupDragMode ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'}`}
-                                                title={groupDragMode ? "Déplacement Groupé Actif" : "Déplacement Simple"}
-                                            >
-                                                {groupDragMode ? <LinkIcon className="w-3.5 h-3.5" /> : <Unlink2 className="w-3.5 h-3.5" />}
-                                            </button>
-                                            <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">{waitingStations.length}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                                        {waitingStations.map(station => (
-                                            <div key={station.id} className="cursor-grab active:cursor-grabbing w-full">
-                                                <StationCard station={station as Workstation} isMini={true} />
-                                            </div>
-                                        ))}
-                                        {waitingStations.length === 0 && (
-                                            <div className="text-center py-8 text-slate-400 text-xs italic">
-                                                Tous les postes sont placés.
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Collapsed State Indicator (Visible when closed on Desktop) */}
-                                {!isSidebarOpen && (
-                                    <div className="absolute inset-0 flex flex-col items-center pt-16 gap-4 w-full lg:flex hidden">
-                                        <Inbox className="w-5 h-5 text-indigo-500" />
-                                        <div className="h-full w-full flex justify-center">
-                                            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest whitespace-nowrap" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)' }}>
-                                                Gamme d'attente ({waitingStations.length})
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
+                    {/* LINKING MODE BANNER */}
+                    {isLinking && (
+                        <div className="bg-indigo-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-md mb-2 rounded-lg animate-in slide-in-from-top-2 z-20">
+                            <div className="flex items-center gap-2">
+                                <MousePointerClick className="w-4 h-4 text-indigo-200" />
+                                <span>Mode Liaison : {linkSource ? "Sélectionnez la destination..." : "Sélectionnez le poste de départ"}</span>
                             </div>
-                        </>
+                            <button
+                                onClick={() => { setIsLinking(false); setLinkSource(null); }}
+                                className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-md text-[10px] transition-colors"
+                            >
+                                Terminer
+                            </button>
+                        </div>
                     )}
 
-                    {/* ... (Main Canvas Area with force-scrollbar styles same as before) ... */}
-                    <div className="flex-1 rounded-2xl bg-slate-100 border border-slate-200 shadow-inner relative overflow-hidden flex flex-col transition-all duration-300">
+                    {/* SWAP MODE BANNER */}
+                    {swapSourceId && !isLinking && (
+                        <div className="bg-orange-500 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-md mb-2 rounded-lg animate-in slide-in-from-top-2 z-20">
+                            <div className="flex items-center gap-2">
+                                <SwapIcon className="w-4 h-4" />
+                                <span>Mode Échange Actif : Sélectionnez le poste cible pour échanger.</span>
+                            </div>
+                            <button
+                                onClick={() => setSwapSourceId(null)}
+                                className="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-md text-[10px] transition-colors"
+                            >
+                                Annuler
+                            </button>
+                        </div>
+                    )}
 
-                        {/* Injected Styles for Scrollbars */}
-                        <style>{`
+                    {/* 2. ZONES INDICATOR - UNCHANGED */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-1.5 flex items-center gap-1 overflow-x-auto text-[10px] font-bold uppercase text-slate-400 shadow-inner shrink-0 mb-1">
+                        <div className="flex items-center gap-2 px-2 py-0.5 bg-slate-50 rounded-lg border border-slate-200 opacity-60 shrink-0"><Package className="w-3 h-3 text-slate-400" /> Stock Tissu</div><ArrowRight className="w-3 h-3 text-slate-300 shrink-0" /><div className="flex items-center gap-2 px-2 py-0.5 bg-slate-50 rounded-lg border border-slate-200 opacity-60 shrink-0"><Scissors className="w-3 h-3 text-slate-400" /> Coupe & Prep</div><ArrowRight className="w-3 h-3 text-emerald-400 shrink-0" /><div className="flex items-center gap-2 px-2 py-0.5 bg-emerald-50 rounded-lg border border-emerald-200 text-emerald-700 shadow-sm shrink-0"><Layers className="w-3 h-3" /> Montage (Atelier)</div><ArrowRight className="w-3 h-3 text-emerald-400 shrink-0" />
+                        <div className="flex items-center gap-3">
+                            {swapControlFinition ? (
+                                <>
+                                    <SpecialZoneControl label="Contrôle" type="CONTROLE" icon={Eye} color={{ bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', hoverBg: 'hover:bg-orange-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('CONTROLE')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
+                                    <button onClick={handleSwapZones} className="p-1 hover:bg-slate-200 rounded-full transition-colors shrink-0 transform active:rotate-180 duration-300" title="Inverser ordre"><ArrowRightLeft className="w-3 h-3 text-slate-400" /></button>
+                                    <SpecialZoneControl label="Finition" type="FINITION" icon={Sparkles} color={{ bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', hoverBg: 'hover:bg-purple-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('FINITION')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
+                                </>
+                            ) : (
+                                <>
+                                    <SpecialZoneControl label="Finition" type="FINITION" icon={Sparkles} color={{ bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', hoverBg: 'hover:bg-purple-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('FINITION')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
+                                    <button onClick={handleSwapZones} className="p-1 hover:bg-slate-200 rounded-full transition-colors shrink-0 transform active:rotate-180 duration-300" title="Inverser ordre"><ArrowRightLeft className="w-3 h-3 text-slate-400" /></button>
+                                    <SpecialZoneControl label="Contrôle" type="CONTROLE" icon={Eye} color={{ bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', hoverBg: 'hover:bg-orange-100' }} currentCount={postes?.filter(p => p.machine.toUpperCase().includes('CONTROLE')).length || 0} onAdd={handleAddSpecial} onRemove={handleRemoveSpecial} />
+                                </>
+                            )}
+                        </div>
+                        <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" /><div className="flex items-center gap-2 px-2 py-0.5 bg-slate-50 rounded-lg border border-slate-200 opacity-60 shrink-0"><Truck className="w-3 h-3 text-slate-400" /> Expédition</div>
+                    </div>
+
+                    {/* 3. CANVAS (With Wrapper & Styles for Scrollbars) */}
+                    <div className="flex-1 flex gap-4 min-h-0 relative h-full">
+
+                        {/* MINI-GAMME SIDEBAR (VISIBLE IN MANUAL MODE) - RESPONSIVE (DRAWER ON MOBILE) */}
+                        {isManualMode && (
+                            <>
+                                {/* Mobile Backdrop */}
+                                <div
+                                    className={`lg:hidden fixed inset-0 bg-black/20 z-20 transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                                    onClick={() => setIsSidebarOpen(false)}
+                                />
+
+                                <div className={`absolute lg:relative h-full bg-slate-50 border-r border-slate-200 shadow-xl z-30 flex flex-col transition-all duration-300 ease-in-out shrink-0 ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full lg:w-8 lg:translate-x-0'}`}>
+                                    {/* Toggle Button - Repositioned for Mobile vs Desktop */}
+                                    <button
+                                        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                                        className={`absolute -right-3 top-4 bg-slate-50 border border-slate-200 text-slate-500 rounded-full p-1 shadow-md hover:text-indigo-600 z-50 transition-transform active:scale-95 ${!isSidebarOpen && window.innerWidth < 1024 ? 'hidden' : ''}`}
+                                    >
+                                        {isSidebarOpen ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                    </button>
+
+                                    {/* Mobile Open Button (When Closed) */}
+                                    {!isSidebarOpen && (
+                                        <button
+                                            onClick={() => setIsSidebarOpen(true)}
+                                            className="lg:hidden absolute top-4 left-4 z-20 bg-slate-50 p-2 rounded-lg shadow-md border border-slate-200 text-indigo-600"
+                                        >
+                                            <Menu className="w-5 h-5" />
+                                        </button>
+                                    )}
+
+                                    {/* Sidebar Content (Visible when open) */}
+                                    <div className={`flex-1 flex flex-col overflow-hidden transition-opacity duration-200 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none invisible'}`}>
+                                        <div className="p-3 border-b border-slate-200 bg-slate-50">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <h3 className="font-bold text-xs uppercase text-slate-500 flex items-center gap-2">
+                                                    <Inbox className="w-4 h-4" /> File d'attente
+                                                </h3>
+                                                <span className="text-[10px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">{waitingStations.length}</span>
+                                            </div>
+                                            {waitingStations.length > 0 && (
+                                                <button
+                                                    onClick={placeAllOnCanvas}
+                                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors active:scale-[0.98] shadow-sm"
+                                                >
+                                                    <Layers className="w-3.5 h-3.5" /> Tout placer sur le plan
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
+                                            {waitingStations.map(station => (
+                                                <div
+                                                    key={station.id}
+                                                    draggable
+                                                    onDragStart={(e) => handleDragStart(e, station.originalIndex, true, station.id)}
+                                                    className="cursor-grab active:cursor-grabbing w-full"
+                                                >
+                                                    <StationCard station={station as Workstation} isMini={true} />
+                                                </div>
+                                            ))}
+                                            {waitingStations.length === 0 && (
+                                                <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-300">
+                                                    <Check className="w-8 h-8" />
+                                                    <span className="text-xs font-bold">Tous les postes sont placés</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Collapsed State Indicator (Visible when closed on Desktop) */}
+                                    {!isSidebarOpen && (
+                                        <div className="absolute inset-0 flex flex-col items-center pt-16 gap-4 w-full lg:flex hidden">
+                                            <Inbox className="w-5 h-5 text-indigo-500" />
+                                            <div className="h-full w-full flex justify-center">
+                                                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest whitespace-nowrap" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)' }}>
+                                                    Gamme d'attente ({waitingStations.length})
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        {/* ... (Main Canvas Area with force-scrollbar styles same as before) ... */}
+                        <div className="flex-1 rounded-2xl bg-slate-100 border border-slate-200 shadow-inner relative overflow-hidden flex flex-col transition-all duration-300">
+
+                            {/* Injected Styles for Scrollbars */}
+                            <style>{`
                        .force-scrollbar {
                            scrollbar-width: thin;
                            scrollbar-color: #cbd5e1 transparent;
@@ -2258,312 +2692,489 @@ export default function Implantation({
                        }
                    `}</style>
 
-                        <div
-                            className="absolute inset-0 opacity-[0.4] transition-all duration-200"
-                            style={{
-                                backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
-                                backgroundSize: '20px 20px',
-                                cursor: isPanning ? 'grabbing' : (isSpacePressed ? 'grab' : 'default')
-                            }}
-                        />
-
-                        {/* DROPPABLE AREA FOR MANUAL MODE - CHANGED HERE TO FIX ZOOM ALIGNMENT */}
-                        <div
-                            ref={scrollContainerRef}
-                            className={`flex-1 overflow-auto p-4 relative z-10 custom-scrollbar force-scrollbar flex flex-col ${orientation === 'portrait' ? 'items-center' : 'items-start pl-4'}`}
-                            style={{ cursor: isPanning ? 'grabbing' : (isSpacePressed ? 'grab' : 'auto') }}
-                            onMouseDown={handlePanStart}
-                            onMouseMove={handlePanMove}
-                            onMouseUp={handlePanEnd}
-                            onMouseLeave={handlePanEnd}
-                            onContextMenu={handleFreeContextMenu} // Right click on background
-                            onDragOver={(e) => isManualMode && e.preventDefault()}
-                            onDrop={(e) => {
-                                if (isManualMode) {
-                                    e.preventDefault();
-                                    const id = e.dataTransfer.getData("stationId");
-                                    if (id) {
-                                        handleManualDrop(id);
-                                    } else if (draggedStationIdx !== null) {
-                                        // Handle dragging existing item from canvas to background
-                                    }
-                                }
-                            }}
-                        >
-                            {/* SVG IS NOW INSIDE THE SCALED DIV TO ENSURE PERFECT ALIGNMENT & SCALING */}
                             <div
-                                ref={contentRef}
-                                className={`transition-transform duration-200 ease-out origin-top-left relative ${layoutType === 'grid' ? 'w-full' : 'min-w-max'}`}
-                                style={{ transform: `scale(${zoom})` }}
+                                className="absolute inset-0 opacity-[0.4] transition-all duration-200"
+                                style={{
+                                    backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+                                    backgroundSize: '20px 20px',
+                                    cursor: isPanning ? 'grabbing' : (isSpacePressed ? 'grab' : 'default')
+                                }}
+                            />
+
+                            {/* DROPPABLE AREA FOR MANUAL MODE - CHANGED HERE TO FIX ZOOM ALIGNMENT */}
+                            <div
+                                ref={scrollContainerRef}
+                                className={`flex-1 overflow-auto p-4 relative z-10 custom-scrollbar force-scrollbar flex flex-col ${orientation === 'portrait' ? 'items-center' : 'items-start pl-4'}`}
+                                style={{ cursor: isPanning ? 'grabbing' : (isSpacePressed ? 'grab' : 'auto') }}
+                                onMouseDown={handlePanStart}
+                                onMouseMove={handlePanMove}
+                                onMouseUp={handlePanEnd}
+                                onMouseLeave={handlePanEnd}
+                                onContextMenu={handleFreeContextMenu} // Right click on background
+                                onDragOver={(e) => isManualMode && e.preventDefault()}
+                                onDrop={(e) => {
+                                    if (isManualMode) {
+                                        e.preventDefault();
+                                        const id = e.dataTransfer.getData("stationId");
+                                        if (id) {
+                                            let dropPos: { x: number; y: number } | undefined;
+                                            if (layoutType === 'free' && contentRef.current) {
+                                                const rect = contentRef.current.getBoundingClientRect();
+                                                // The 3000px canvas has 24px left padding and ~64px top offset.
+                                                let targetX = Math.round((e.clientX - rect.left) / zoom) - 24;
+                                                let targetY = Math.round((e.clientY - rect.top) / zoom) - 64;
+
+                                                // Apply Canvas Bounds Check on Drop
+                                                const MIN_X = 24;
+                                                const MIN_Y = 24;
+                                                const MAX_X = 3000 - 240;
+                                                const MAX_Y = 2000 - 160;
+
+                                                targetX = Math.max(MIN_X, Math.min(MAX_X, targetX));
+                                                targetY = Math.max(MIN_Y, Math.min(MAX_Y, targetY));
+
+                                                dropPos = { x: targetX, y: targetY };
+                                            }
+                                            handleManualDrop(id, dropPos);
+                                        } else if (draggedStationIdx !== null) {
+                                            // Handle dragging existing item from canvas to background
+                                        }
+                                    }
+                                }}
                             >
-                                {/* SVG OVERLAY - inside zoomed contentRef, uses scrollContainerRef for scroll offsets */}
-                                {manualLinks && (
-                                    <LinkOverlay
-                                        links={manualLinks}
-                                        stations={workstations}
-                                        showLinks={showLinks}
-                                        zoom={zoom}
-                                        containerRef={scrollContainerRef}
-                                        onRemoveLink={handleRemoveLink}
-                                        onEditLabel={handleEditLinkLabel}
-                                    />
-                                )}
+                                {/* SVG IS NOW INSIDE THE SCALED DIV TO ENSURE PERFECT ALIGNMENT & SCALING */}
+                                <div
+                                    ref={contentRef}
+                                    className={`transition-transform duration-200 ease-out origin-top-left relative min-w-max`}
+                                    style={{ transform: `scale(${zoom})` }}
+                                >
+                                    {/* SVG OVERLAY - inside zoomed contentRef, uses scrollContainerRef for scroll offsets */}
+                                    {manualLinks && (
+                                        <LinkOverlay
+                                            links={manualLinks}
+                                            stations={workstations}
+                                            showLinks={showLinks}
+                                            zoom={zoom}
+                                            containerRef={scrollContainerRef}
+                                            onRemoveLink={handleRemoveLink}
+                                            onEditLabel={handleEditLinkLabel}
+                                        />
+                                    )}
 
-                                {/* FREE LAYOUT MODE */}
-                                {layoutType === 'free' && (
-                                    <div className="relative w-[3000px] h-[2000px] bg-slate-50/20 rounded-xl" style={{ backgroundImage: 'radial-gradient(#94a3b8 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
-                                        {workstations.map((st, idx) => {
-                                            // Calculate default positions if not set
-                                            const col = idx % 6;
-                                            const row = Math.floor(idx / 6);
-                                            const defaultX = 50 + (col * 240);
-                                            const defaultY = 50 + (row * 180);
+                                    {/* FREE LAYOUT MODE */}
+                                    {layoutType === 'free' && (
+                                        <div className={`flex flex-col gap-6 p-6 w-full min-w-max pb-32 ${orientation === 'portrait' ? 'rotate-90 origin-center scale-75 mt-40' : ''}`}>
+                                            <div className="relative mt-4 flex flex-col">
+                                                <div className="absolute -top-4 left-6 bg-indigo-600/80 backdrop-blur-md text-white px-5 py-1.5 rounded-xl text-xs font-black shadow-lg uppercase tracking-widest border border-white/20 z-20">Plan Libre</div>
 
-                                            const x = st.x ?? defaultX;
-                                            const y = st.y ?? defaultY;
-                                            const rotation = st.rotation || 0;
-                                            const shape = st.shape || 'rect';
+                                                <div className="relative w-[3000px] h-[2000px] mt-4 overflow-hidden">
+                                                    {workstations
+                                                        .filter(st => st.machine !== 'VIDE' || st.shape === 'circle' || st.shape === 'zone')
+                                                        .map((st, idx) => {
+                                                            // Calculate default positions if not set
+                                                            const col = idx % 6;
+                                                            const row = Math.floor(idx / 6);
+                                                            const defaultX = 50 + (col * 240);
+                                                            const defaultY = 50 + (row * 180);
 
-                                            const isDraggingThis = freeDragRef.current?.id === st.id;
+                                                            const x = st.x ?? defaultX;
+                                                            const y = st.y ?? defaultY;
+                                                            const rotation = st.rotation || 0;
+                                                            const shape = st.shape || 'rect';
 
-                                            return (
-                                                <div
-                                                    key={st.id}
-                                                    id={`station-card-${st.id}`}
-                                                    className={`absolute transition-shadow ${isDraggingThis ? 'z-[100] shadow-2xl scale-105 cursor-grabbing' : 'z-10'} ${isSpacePressed ? 'cursor-grab' : 'cursor-move hover:z-50'}`}
-                                                    style={{
-                                                        left: x,
-                                                        top: y,
-                                                        transform: `rotate(${rotation}deg)`
-                                                    }}
-                                                    onMouseDown={(e) => handleFreeStart(e, st.id, x, y)}
-                                                    onTouchStart={(e) => handleFreeStart(e, st.id, x, y)}
-                                                    onContextMenu={(e) => {
-                                                        // Prevent default context menu, let background one handle general or item specific
-                                                        // For now, we use the same handler but pass station info via state if needed, or rely on selection
-                                                        handleContextMenu(e, st);
-                                                    }}
-                                                >
-                                                    <div className="pointer-events-none">
-                                                        {shape === 'circle' ? (
-                                                            <div className="w-32 h-32 rounded-full border-4 border-dashed border-slate-300 bg-white/80 flex items-center justify-center shadow-sm">
-                                                                <div className="text-center">
-                                                                    <div className="text-xs font-bold text-slate-500">{st.name}</div>
-                                                                    <div className="text-[10px] text-slate-400">{st.machine}</div>
+                                                            const isDraggingThis = freeDragRef.current?.id === st.id;
+
+                                                            return (
+                                                                <div
+                                                                    key={st.id}
+                                                                    id={`station-card-${st.id}`}
+                                                                    className={`absolute select-none transition-shadow ${isDraggingThis ? 'z-[100] shadow-2xl scale-105 cursor-grabbing' : 'z-10'} ${isSpacePressed ? 'cursor-grab' : 'cursor-move hover:z-50'}`}
+                                                                    style={{
+                                                                        left: x,
+                                                                        top: y,
+                                                                        transform: `rotate(${rotation}deg)`
+                                                                    }}
+                                                                    onDragStart={(e) => e.preventDefault()}
+                                                                    onMouseDown={(e) => handleFreeStart(e, st.id, x, y)}
+                                                                    onTouchStart={(e) => handleFreeStart(e, st.id, x, y)}
+                                                                    onContextMenu={(e) => {
+                                                                        handleContextMenu(e, st);
+                                                                    }}
+                                                                >
+                                                                    {shape === 'circle' ? (
+                                                                        <div className="w-32 h-32 rounded-full border-4 border-dashed border-slate-300 bg-slate-100/80 flex items-center justify-center shadow-sm pointer-events-none">
+                                                                            <div className="text-center">
+                                                                                <div className="text-xs font-bold text-slate-500">{st.name}</div>
+                                                                                <div className="text-[10px] text-slate-400">{st.machine}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : shape === 'zone' ? (
+                                                                        <div className="w-48 h-32 border-2 border-dashed border-indigo-300 bg-indigo-50/30 rounded-xl flex items-center justify-center pointer-events-none">
+                                                                            <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">Zone {st.name}</span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <StationCard station={st} />
+                                                                    )}
                                                                 </div>
-                                                            </div>
-                                                        ) : shape === 'zone' ? (
-                                                            <div className="w-48 h-32 border-2 border-dashed border-indigo-300 bg-indigo-50/30 rounded-xl flex items-center justify-center">
-                                                                <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">Zone {st.name}</span>
-                                                            </div>
-                                                        ) : (
-                                                            <StationCard station={st} />
-                                                        )}
-                                                    </div>
+                                                            )
+                                                        })}
                                                 </div>
-                                            )
-                                        })}
-                                    </div>
-                                )}
+                                            </div>
+                                        </div>
+                                    )}
 
-                                {/* ... (Layout rendering logic: WHEAT, ZIGZAG, GRID - UNCHANGED) ... */}
-                                {layoutType === 'wheat' && (
-                                    <div className="flex flex-col gap-12 items-center pb-20 w-full min-w-max px-8 pt-8">
-                                        {wheatGroups.map((group, idx) => {
-                                            const left = group.left;
-                                            const right = group.right;
+                                    {/* ═══ U-LIGNE (Goes forward, U-turns, comes back) ═══ */}
+                                    {layoutType === 'zigzag' && (
+                                        <div className={`flex flex-col gap-6 items-center min-w-max pb-32 p-8 ${orientation === 'portrait' ? 'rotate-90 origin-center scale-75 mt-40' : ''}`}>
+                                            {structureSections.map((section) => {
+                                                const topRow = section.stations.filter((_, i) => i % 2 === 0);
+                                                const bottomRow = section.stations.filter((_, i) => i % 2 !== 0);
 
-                                            return (
-                                                <div key={idx} className="flex flex-col items-center relative">
-                                                    {/* CENTRAL SPINE CONNECTOR */}
-                                                    <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-1.5 bg-slate-300 -z-10 rounded-full h-[140%]" />
+                                                let bgClass = "bg-indigo-600/80";
+                                                let borderClass = "border-indigo-500";
+                                                if (section.theme === 'amber') { bgClass = "bg-amber-600/80"; borderClass = "border-amber-500"; }
+                                                if (section.theme === 'sky') { bgClass = "bg-sky-600/80"; borderClass = "border-sky-500"; }
 
-                                                    <div className="flex items-center gap-16 relative">
-                                                        {/* LEFT WING */}
-                                                        <div className="relative w-44">
-                                                            {left ? (
-                                                                <>
-                                                                    <StationCard station={left} />
-                                                                    {/* Connector Arm to Spine */}
-                                                                    <div className="absolute top-1/2 left-full w-8 h-1.5 bg-slate-300 -translate-y-1/2 z-0"></div>
-                                                                    <div className="absolute top-1/2 left-full translate-x-4 -translate-y-1/2 w-3 h-3 bg-white border-2 border-slate-300 rounded-full z-10"></div>
-                                                                </>
-                                                            ) : (
-                                                                <div className="h-20 w-full border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 text-xs font-bold uppercase">
-                                                                    Emplacement Libre
+                                                return (
+                                                    <div key={section.id} className="relative w-full border-2 border-dashed border-slate-200 rounded-3xl p-8 bg-slate-50/50 mb-6 shadow-sm flex flex-col items-center">
+                                                        <div className={`absolute -top-4 left-6 ${bgClass} backdrop-blur-md text-white px-5 py-1.5 rounded-xl text-xs font-black shadow-lg uppercase tracking-widest border border-white/20 z-20 flex gap-2 items-center`}>
+                                                            {section.name}
+                                                            {section.hourly && <span className="bg-white/20 px-2 py-0.5 rounded text-[10px]">Obj: {section.hourly} p/h</span>}
+                                                        </div>
+
+                                                        <div className="flex flex-col gap-6 pt-4 w-full">
+                                                            {topRow.length > 0 && (
+                                                                <div className="relative w-full">
+                                                                    <div className={`absolute -left-4 top-1/2 -translate-y-1/2 ${bgClass} text-white text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wider shadow`}>→</div>
+                                                                    <div className="flex items-center gap-6 pl-8">
+                                                                        {topRow.map((st, i) => (
+                                                                            <div key={`utop-${st.id}`} className="flex items-center gap-6">
+                                                                                <div id={`station-card-${st.id}`} className={`relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl border-b-4 ${borderClass}`}>
+                                                                                    <StationCard station={st} />
+                                                                                </div>
+                                                                                {i < topRow.length - 1 && (
+                                                                                    <div className={`flex items-center text-slate-400 opacity-60`}>
+                                                                                        <div className={`w-6 h-1 rounded bg-slate-200`}></div>
+                                                                                        <ChevronRight className="-ml-2 w-5 h-5 stroke-[3]" />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {bottomRow.length > 0 && (
+                                                                <div className="flex justify-end w-full pr-12">
+                                                                    <div className="flex flex-col items-center opacity-60">
+                                                                        <div className="w-1.5 h-8 rounded bg-slate-300"></div>
+                                                                        <div className="bg-slate-500 text-white text-[8px] font-black px-2 py-1 rounded shadow">U-TURN</div>
+                                                                        <div className="w-1.5 h-8 rounded bg-slate-300"></div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {bottomRow.length > 0 && (
+                                                                <div className="relative w-full">
+                                                                    <div className="absolute -left-4 top-1/2 -translate-y-1/2 bg-slate-500 text-white text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wider shadow">←</div>
+                                                                    <div className="flex flex-row-reverse items-center gap-6 pr-8">
+                                                                        {bottomRow.map((st, i) => (
+                                                                            <div key={`ubottom-${st.id}`} className="flex flex-row-reverse items-center gap-6">
+                                                                                <div id={`station-card-${st.id}`} className={`relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl border-t-4 ${borderClass}`}>
+                                                                                    <StationCard station={st} />
+                                                                                </div>
+                                                                                {i < bottomRow.length - 1 && (
+                                                                                    <div className="flex items-center text-slate-400 opacity-60">
+                                                                                        <ChevronLeft className="-mr-2 w-5 h-5 stroke-[3]" />
+                                                                                        <div className="w-6 h-1 rounded bg-slate-200"></div>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
                                                                 </div>
                                                             )}
                                                         </div>
+                                                    </div>
+                                                );
+                                            })}
+                                            
+                                            {/* EXPÉDITION */}
+                                            <div className="flex justify-start w-full pl-8 mt-4">
+                                                <div className="flex items-center gap-4 bg-slate-800 text-white px-8 py-4 rounded-2xl shadow-2xl border-4 border-slate-700 hover:scale-105 transition-transform">
+                                                    <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg"><Truck className="w-6 h-6 animate-pulse" /></div>
+                                                    <div className="flex flex-col"><span className="text-[10px] uppercase font-black tracking-widest text-slate-400">Terminé</span><span className="text-sm font-black uppercase tracking-widest">EXPÉDITION</span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
 
-                                                        {/* CENTER NODE */}
-                                                        <div className="relative z-10 w-4 h-4 bg-slate-800 rounded-full border-2 border-white shadow-sm shrink-0"></div>
+                                    {/* ═══ Double Zigzag Layout ═══ */}
+                                    {layoutType === 'double-zigzag' && (
+                                        <div className={`flex flex-col gap-6 p-6 w-full min-w-max pb-32 ${orientation === 'portrait' ? 'rotate-90 origin-center scale-75 mt-40' : ''}`}>
+                                            {structureSections.map((section) => {
+                                                const sideA = section.stations.filter((_, i) => i % 2 === 0);
+                                                const sideB = section.stations.filter((_, i) => i % 2 !== 0);
 
-                                                        {/* RIGHT WING */}
-                                                        <div className="relative w-44">
-                                                            {right ? (
-                                                                <>
-                                                                    <StationCard station={right} />
-                                                                    {/* Connector Arm to Spine */}
-                                                                    <div className="absolute top-1/2 right-full w-8 h-1.5 bg-slate-300 -translate-y-1/2 z-0"></div>
-                                                                    <div className="absolute top-1/2 right-full -translate-x-7 -translate-y-1/2 w-3 h-3 bg-white border-2 border-slate-300 rounded-full z-10"></div>
-                                                                </>
-                                                            ) : (
-                                                                <div className="h-20 w-full border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 text-xs font-bold uppercase">
-                                                                    Emplacement Libre
+                                                let bgClass = "bg-indigo-600/80";
+                                                let borderClassA = "border-indigo-500";
+                                                let borderClassB = "border-orange-500";
+                                                if (section.theme === 'amber') { bgClass = "bg-amber-600/80"; borderClassA = "border-amber-500"; borderClassB = "border-amber-400"; }
+                                                if (section.theme === 'sky') { bgClass = "bg-sky-600/80"; borderClassA = "border-sky-500"; borderClassB = "border-sky-400"; }
+                                                let arrowColor = section.theme === 'amber' ? "#f59e0b" : section.theme === 'sky' ? "#0ea5e9" : "#818cf8";
+
+                                                return (
+                                                    <div key={section.id} className="relative mt-4 flex flex-col w-full border-2 border-dashed border-slate-200 rounded-3xl p-6 bg-slate-50/50 mb-6 shadow-sm">
+                                                        <div className={`absolute -top-4 left-6 ${bgClass} backdrop-blur-md text-white px-5 py-1.5 rounded-xl text-xs font-black shadow-lg uppercase tracking-widest border border-white/20 z-20 flex gap-2 items-center`}>
+                                                            {section.name}
+                                                            {section.hourly && <span className="bg-white/20 px-2 py-0.5 rounded text-[10px]">Obj: {section.hourly} p/h</span>}
+                                                        </div>
+
+                                                        <div className="flex flex-col gap-24 relative w-full pt-8">
+                                                            {sideA.length > 0 && (
+                                                                <div className="flex items-center gap-12 relative z-10 w-full justify-start">
+                                                                    {sideA.map((st, i) => (
+                                                                        <div key={`sideA-${st.id}`} className="flex items-center gap-12 relative">
+                                                                            <div id={`station-card-${st.id}`} className={`relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl bg-white border-b-4 ${borderClassA}`}>
+                                                                                <StationCard station={st} />
+                                                                            </div>
+                                                                            {i < sideB.length && (
+                                                                                <div className="absolute top-[80%] left-[80%] w-[120px] h-[70px] z-0 overflow-visible pointer-events-none opacity-80">
+                                                                                    <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="overflow-visible ">
+                                                                                        <path d="M 0 0 C 40 30, 60 70, 100 100" fill="none" stroke={arrowColor} strokeWidth="4" strokeDasharray="6,4" strokeLinecap="round" className="" />
+                                                                                        <polygon points="85,90 100,100 95,80" fill={arrowColor} />
+                                                                                    </svg>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {sideB.length > 0 && (
+                                                                <div className="flex items-center gap-12 relative z-10 w-full justify-start translate-x-16">
+                                                                    {sideB.map((st, i) => (
+                                                                        <div key={`sideB-${st.id}`} className="flex items-center gap-12 relative">
+                                                                            <div id={`station-card-${st.id}`} className={`relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl bg-white border-t-4 ${borderClassB}`}>
+                                                                                <StationCard station={st} />
+                                                                            </div>
+                                                                            {i + 1 < sideA.length && (
+                                                                                <div className="absolute bottom-[80%] left-[80%] w-[120px] h-[70px] z-0 overflow-visible pointer-events-none opacity-80">
+                                                                                    <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="overflow-visible ">
+                                                                                        <path d="M 0 100 C 40 70, 60 30, 100 0" fill="none" stroke="#64748b" strokeWidth="4" strokeDasharray="6,4" strokeLinecap="round" className="" />
+                                                                                        <polygon points="85,10 100,0 95,20" fill="#64748b" />
+                                                                                    </svg>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </div>
+                                                );
+                                            })}
+                                            
+                                            {/* EXPÉDITION */}
+                                            <div className="flex justify-end w-full mt-8 pr-4">
+                                                <div className="flex items-center gap-4 bg-slate-800 text-white px-8 py-4 rounded-2xl shadow-2xl border border-white/20 hover:scale-105 transition-transform">
+                                                    <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg"><Truck className="w-6 h-6 animate-pulse" /></div>
+                                                    <div className="flex flex-col"><span className="text-[10px] uppercase font-black tracking-widest text-slate-400">Terminé</span><span className="text-sm font-black uppercase tracking-widest">EXPÉDITION</span></div>
                                                 </div>
-                                            );
-                                        })}
-                                        <div className="mt-8 flex flex-col items-center relative z-10">
-                                            <div className="flex items-center gap-2 px-6 py-3 bg-slate-800 text-white rounded-xl shadow-lg border-2 border-slate-700">
-                                                <Truck className="w-5 h-5" /> <span className="text-sm font-bold uppercase">Expédition</span>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
 
-                                 {/* NEW U-Line Layout (Horizontal Snaking) */}
-                                 {(layoutType === 'zigzag' || layoutType === 'snake') && (
-                                     <div className={`flex flex-col gap-6 items-center min-w-max pb-32 p-8 ${orientation === 'portrait' ? 'rotate-90 origin-center scale-75 mt-40' : ''}`}>
-                                         
-                                         {/* TOP ROW: L -> R Flow */}
-                                         <div className="flex items-center gap-6 relative z-10 w-full justify-start pl-8">
-                                             {sigZagData.topRow.map((st, i) => (
-                                                 <div key={`top-${st.id}`} className="flex items-center gap-6">
-                                                     <div className="relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl">
-                                                         <StationCard station={st} />
-                                                     </div>
-                                                     
-                                                     {i < sigZagData.topRow.length - 1 && (
-                                                         <div className="flex items-center text-indigo-400 opacity-60">
-                                                             <div className="w-8 h-1.5 rounded bg-indigo-200 shadow-inner"></div>
-                                                             <ChevronRight className="-ml-3 w-6 h-6 stroke-[3]" />
-                                                         </div>
-                                                     )}
-                                                 </div>
-                                             ))}
-                                         </div>
+                                    {/* ═══ Line Layout ═══ */}
+                                    {layoutType === 'line' && (
+                                        <div className={`flex flex-col gap-6 p-6 w-full min-w-max pb-32 ${orientation === 'portrait' ? 'rotate-90 origin-center scale-75 mt-40' : ''}`}>
+                                            {structureSections.map((section) => {
+                                                const topRow = section.stations.filter((_, i) => i % 2 === 0);
+                                                const bottomRow = section.stations.filter((_, i) => i % 2 !== 0);
 
-                                         {/* U-TURN CONNECTOR */}
-                                         {sigZagData.bottomRow.length > 0 && (
-                                             <div className="flex justify-end w-full" style={{ paddingRight: '12rem' }}>
-                                                 <div className="flex flex-col items-center opacity-60">
-                                                     <div className="w-1.5 h-12 rounded bg-indigo-200"></div>
-                                                     <ArrowDown className="w-8 h-8 text-indigo-400 -mt-2 stroke-[3]" />
-                                                     <div className="w-1.5 h-12 rounded bg-indigo-200 -mt-2"></div>
-                                                 </div>
-                                             </div>
-                                         )}
+                                                let bgClass = "bg-indigo-600";
+                                                let borderClass = "border-indigo-500";
+                                                if (section.theme === 'amber') { bgClass = "bg-amber-600"; borderClass = "border-amber-500"; }
+                                                if (section.theme === 'sky') { bgClass = "bg-sky-600"; borderClass = "border-sky-500"; }
 
-                                         {/* BOTTOM ROW: R -> L Flow (Visual Reverse) */}
-                                         <div className="flex flex-row-reverse items-center gap-6 relative z-10 w-full justify-start pr-8 mt-2">
-                                             {sigZagData.bottomRow.map((st, i) => (
-                                                 <div key={`bottom-${st.id}`} className="flex flex-row-reverse items-center gap-6">
-                                                     <div className="relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl">
-                                                         <StationCard station={st} />
-                                                     </div>
+                                                return (
+                                                    <div key={section.id} className="relative mt-4 flex flex-col bg-slate-50/80 rounded-3xl border-2 border-slate-200 p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] mb-6">
+                                                        <div className={`absolute -top-4 left-6 ${bgClass} text-white px-5 py-1.5 rounded-xl text-xs font-black shadow-lg uppercase tracking-widest border border-white/20 flex gap-2 items-center z-20`}>
+                                                            {section.name}
+                                                            {section.hourly && <span className="bg-white/20 px-2 py-0.5 rounded text-[10px]">Obj: {section.hourly} p/h</span>}
+                                                        </div>
 
-                                                     {i < sigZagData.bottomRow.length - 1 && (
-                                                         <div className="flex items-center text-indigo-400 opacity-60">
-                                                             <ChevronLeft className="-mr-3 w-6 h-6 stroke-[3]" />
-                                                             <div className="w-8 h-1.5 rounded bg-indigo-200 shadow-inner"></div>
-                                                         </div>
-                                                     )}
-                                                 </div>
-                                             ))}
-                                         </div>
+                                                        <div className="flex flex-col gap-20 pt-8 w-full">
+                                                            {topRow.length > 0 && (
+                                                                <div className="relative">
+                                                                    <div className="absolute -left-2 top-1/2 -translate-y-1/2 bg-slate-500 text-white text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wider shadow z-10">A</div>
+                                                                    <div className="flex items-center gap-6 pl-8">
+                                                                        {topRow.map((st, i) => (
+                                                                            <div key={`lineA-${st.id}`} className="flex items-center gap-6">
+                                                                                <div id={`station-card-${st.id}`} className={`relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl border-b-4 ${borderClass}`}>
+                                                                                    <StationCard station={st} />
+                                                                                </div>
+                                                                                {i < topRow.length - 1 && (
+                                                                                    <div className={`flex items-center text-slate-400 opacity-80 shrink-0`}>
+                                                                                        <div className="relative w-10 h-1.5 flex items-center overflow-hidden rounded-l">
+                                                                                            <div className={`absolute inset-0 bg-slate-200/40`}></div>
+                                                                                            <div className={`absolute inset-0 w-full bg-gradient-to-r from-transparent via-slate-400 to-transparent`}></div>
+                                                                                        </div>
+                                                                                        <ChevronRight className="-ml-2 w-6 h-6 stroke-[4] drop-shadow-md relative z-10" />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
 
-                                         {/* EXPÉDITION NODE - Final End after Bottom Row (Left Side) */}
-                                         <div className="flex justify-start w-full pl-8 mt-8">
-                                             <div className="flex flex-col items-center">
-                                                 <div className="w-1.5 h-8 bg-indigo-200 opacity-40 rounded"></div>
-                                                 <div className="flex items-center gap-4 bg-slate-800 text-white px-8 py-4 rounded-2xl shadow-2xl border-4 border-slate-700 hover:scale-105 transition-transform">
-                                                     <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
-                                                         <Truck className="w-6 h-6 animate-pulse" />
-                                                     </div>
-                                                     <div className="flex flex-col">
-                                                         <span className="text-[10px] uppercase font-black tracking-widest text-slate-400">Terminé</span>
-                                                         <span className="text-sm font-black uppercase tracking-widest">EXPÉDITION</span>
-                                                     </div>
-                                                 </div>
-                                             </div>
-                                         </div>
-                                     </div>
-                                 )}
-
-                                {/* OTHER LAYOUTS REMAIN SAME */}
-                                {layoutType === 'grid' && (
-                                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 min-h-[500px]">
-                                        {workstations.map(st => <StationCard key={st.id} station={st} isGrid={true} />)}
-                                    </div>
-                                )}
-
-                                {layoutType === 'line' && (
-                                    <div className="flex flex-col gap-12 p-8 w-full">
-                                        {/* Line 1 */}
-                                        <div className="flex items-center gap-4">
-
-                                            <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 border-b border-dashed border-slate-200 w-full custom-scrollbar">
-                                                {workstations.slice(0, Math.ceil(workstations.length / 2)).map(st => (
-                                                    <div key={st.id} className="shrink-0">
-                                                        <StationCard station={st} />
+                                                            {bottomRow.length > 0 && (
+                                                                <div className="relative">
+                                                                    <div className="absolute -left-2 top-1/2 -translate-y-1/2 bg-slate-500 text-white text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wider shadow z-10">B</div>
+                                                                    <div className="flex items-center gap-6 pl-8">
+                                                                        {bottomRow.map((st, i) => (
+                                                                            <div key={`lineB-${st.id}`} className="flex items-center gap-6">
+                                                                                <div id={`station-card-${st.id}`} className={`relative group transition-transform hover:scale-[1.02] shadow-sm hover:shadow-xl rounded-xl border-t-4 ${borderClass}`}>
+                                                                                    <StationCard station={st} />
+                                                                                </div>
+                                                                                {i < bottomRow.length - 1 && (
+                                                                                    <div className="flex items-center text-slate-400 opacity-80 shrink-0">
+                                                                                        <div className="relative w-10 h-1.5 flex items-center overflow-hidden rounded-l">
+                                                                                            <div className="absolute inset-0 bg-slate-200/40"></div>
+                                                                                            <div className="absolute inset-0 w-full bg-gradient-to-r from-transparent via-slate-400 to-transparent animate-[pulse_1.5s_ease-in-out_infinite_0.3s]"></div>
+                                                                                        </div>
+                                                                                        <ChevronRight className="-ml-2 w-6 h-6 stroke-[4] drop-shadow-md animate-[pulse_1.5s_ease-in-out_infinite_0.3s] relative z-10" />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                ))}
+                                                );
+                                            })}
+                                            
+                                            {/* EXPÉDITION */}
+                                            <div className="flex justify-end w-full mt-8 pr-4">
+                                                <div className="flex items-center gap-4 bg-slate-800 text-white px-8 py-4 rounded-2xl shadow-2xl border border-white/20 hover:scale-105 transition-transform">
+                                                    <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg"><Truck className="w-6 h-6 animate-pulse" /></div>
+                                                    <div className="flex flex-col"><span className="text-[10px] uppercase font-black tracking-widest text-slate-400">Terminé</span><span className="text-sm font-black uppercase tracking-widest">EXPÉDITION</span></div>
+                                                </div>
                                             </div>
                                         </div>
+                                    )}
 
-                                        {/* Line 2 */}
-                                        <div className="flex items-center gap-4">
-
-                                            <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 w-full custom-scrollbar">
-                                                {workstations.slice(Math.ceil(workstations.length / 2)).map(st => (
-                                                    <div key={st.id} className="shrink-0">
-                                                        <StationCard station={st} />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
+                                </div>
                             </div>
                         </div>
+
+                        {/* FLOATING MATERIAL PANEL */}
+                        {showMaterialsPanel && (
+                            <div className="fixed z-[5010] bg-slate-50 rounded-2xl border border-slate-200 shadow-xl overflow-hidden flex flex-col" style={{ left: matPanel.x, top: matPanel.y, width: matPanel.w, height: matPanel.h }}>
+                                <div onMouseDown={startDragMat} className="p-4 bg-slate-50 border-b border-slate-100 cursor-move select-none flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm pointer-events-none"><Calculator className="w-4 h-4 text-indigo-500" /> Total Matériel</h3>
+                                    <button onClick={() => setShowMaterialsPanel(false)} onMouseDown={(e) => e.stopPropagation()} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+                                    <table className="w-full text-left border-collapse"><tbody>{machinesSummary.counts.map(([name, count]) => (<tr key={name} className="border-b border-slate-50 hover:bg-slate-50"><td className="py-2 px-3 text-xs font-medium text-slate-600">{name}</td><td className="py-2 px-3 text-right"><span className="inline-flex items-center justify-center bg-slate-100 text-slate-700 font-bold text-[10px] px-2 py-0.5 rounded-full min-w-[24px]">{count}</span></td></tr>))}</tbody></table>
+                                </div>
+                                <div className="p-4 bg-slate-50 border-t border-slate-100 relative"><div className="flex justify-between items-center"><span className="text-xs font-bold text-slate-500 uppercase">Total Postes</span><span className="text-lg font-black text-indigo-600">{machinesSummary.total}</span></div><div onMouseDown={startResizeMat} className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-center justify-center opacity-50 hover:opacity-100"><Scaling className="w-4 h-4 text-slate-400 rotate-90" /></div></div>
+                            </div>
+                        )}
                     </div>
-
-                    {/* FLOATING MATERIAL PANEL */}
-                    {showMaterialsPanel && (
-                        <div className="fixed z-[5010] bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden flex flex-col" style={{ left: matPanel.x, top: matPanel.y, width: matPanel.w, height: matPanel.h }}>
-                            <div onMouseDown={startDragMat} className="p-4 bg-slate-50 border-b border-slate-100 cursor-move select-none flex justify-between items-center">
-                                <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm pointer-events-none"><Calculator className="w-4 h-4 text-indigo-500" /> Total Matériel</h3>
-                                <button onClick={() => setShowMaterialsPanel(false)} onMouseDown={(e) => e.stopPropagation()} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-                                <table className="w-full text-left border-collapse"><tbody>{machinesSummary.counts.map(([name, count]) => (<tr key={name} className="border-b border-slate-50 hover:bg-slate-50"><td className="py-2 px-3 text-xs font-medium text-slate-600">{name}</td><td className="py-2 px-3 text-right"><span className="inline-flex items-center justify-center bg-slate-100 text-slate-700 font-bold text-[10px] px-2 py-0.5 rounded-full min-w-[24px]">{count}</span></td></tr>))}</tbody></table>
-                            </div>
-                            <div className="p-4 bg-slate-50 border-t border-slate-100 relative"><div className="flex justify-between items-center"><span className="text-xs font-bold text-slate-500 uppercase">Total Postes</span><span className="text-lg font-black text-indigo-600">{machinesSummary.total}</span></div><div onMouseDown={startResizeMat} className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-center justify-center opacity-50 hover:opacity-100"><Scaling className="w-4 h-4 text-slate-400 rotate-90" /></div></div>
-                        </div>
-                    )}
-                </div>
+                </div>{/* End of Animated Inner Container */}
 
                 {/* Fullscreen Close Button */}
                 {isFullScreen && (
                     <button
                         onClick={toggleFullScreen}
-                        className="absolute top-4 right-4 z-50 p-2 bg-white/90 backdrop-blur-sm rounded-full shadow-lg border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-all hover:scale-110"
-                        title="Quitter plein écran"
+                        className="absolute top-6 right-6 z-50 p-3 bg-white/60 backdrop-blur-xl rounded-full shadow-lg border border-slate-200/50 text-slate-500 hover:text-rose-600 hover:bg-white hover:scale-110 active:scale-95 transition-all duration-300 animate-in slide-in-from-top-8 fade-in"
+                        title="Quitter plein écran (Esc)"
                     >
-                        <X className="w-6 h-6" />
+                        <X className="w-5 h-5" />
                     </button>
                 )}
             </div>
+
+            {sectionTransferDialog && createPortal(
+                <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+                        onClick={() => resolveSectionTransferDialog('cancel')}
+                    />
+                    <div className="relative bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                        <div className="px-5 py-4 border-b border-slate-100 bg-slate-50">
+                            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Changement de catégorie poste</h3>
+                            <p className="text-xs text-slate-500 mt-1">
+                                Poste <span className="font-bold text-slate-700">{sectionTransferDialog.posteName}</span> :
+                                <span className="font-bold"> {SECTION_LABELS[sectionTransferDialog.source]}</span> vers
+                                <span className="font-bold"> {SECTION_LABELS[sectionTransferDialog.target]}</span>.
+                            </p>
+                        </div>
+
+                        <div className="px-5 py-4 space-y-3">
+                            {sectionTransferDialog.mode === 'confirm-transfer' ? (
+                                <p className="text-sm text-slate-600">
+                                    Voulez-vous déplacer ce poste et reclasser ses opérations en
+                                    <span className="font-bold"> {SECTION_LABELS[sectionTransferDialog.target]}</span> ?
+                                </p>
+                            ) : (
+                                <p className="text-sm text-slate-600">
+                                    Ce poste touche une zone commune. Choisissez comment il doit etre comptabilise.
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 flex flex-wrap gap-2 justify-end">
+                            <button
+                                onClick={() => resolveSectionTransferDialog('cancel')}
+                                className="px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 bg-white hover:bg-slate-100"
+                            >
+                                Annuler
+                            </button>
+
+                            {sectionTransferDialog.mode === 'global-choice' ? (
+                                <>
+                                    <button
+                                        onClick={() => resolveSectionTransferDialog('keep-global')}
+                                        className="px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-100"
+                                    >
+                                        Garder Zone Commune
+                                    </button>
+                                    <button
+                                        onClick={() => resolveSectionTransferDialog('set-prep')}
+                                        className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                                    >
+                                        Classer Prepa
+                                    </button>
+                                    <button
+                                        onClick={() => resolveSectionTransferDialog('set-montage')}
+                                        className="px-3 py-2 rounded-lg text-xs font-bold border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100"
+                                    >
+                                        Classer Montage
+                                    </button>
+                                </>
+                            ) : (
+                                <button
+                                    onClick={() => resolveSectionTransferDialog('confirm-target')}
+                                    className="px-3 py-2 rounded-lg text-xs font-bold border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                                >
+                                    OK deplacer
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
 
             {/* ... (Existing Edit Modal & Context Menu Portals - no changes needed there) ... */}
             {editModal && createPortal(
                 <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
                     {/* BACKDROP */}
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={closeEditModal} />
+                    <div className="absolute inset-0 bg-slate-900/60 " onClick={closeEditModal} />
                     {/* MODAL CONTENT */}
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
                         {/* DYNAMIC HEADER COLOR */}
@@ -2802,7 +3413,7 @@ export default function Implantation({
             {/* ... (Existing Save/Load Template Modals - NO CHANGES NEEDED) ... */}
             {showSaveTemplateModal && (
                 <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowSaveTemplateModal(false)} />
+                    <div className="absolute inset-0 bg-slate-900/60 " onClick={() => setShowSaveTemplateModal(false)} />
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6">
                         <h3 className="font-bold text-slate-800 text-lg mb-4">Sauvegarder le Gabarit</h3>
                         <input
@@ -2823,7 +3434,7 @@ export default function Implantation({
 
             {showLoadTemplateModal && (
                 <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowLoadTemplateModal(false)} />
+                    <div className="absolute inset-0 bg-slate-900/60 " onClick={() => setShowLoadTemplateModal(false)} />
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
                         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="font-bold text-slate-700">Mes Gabarits</h3>

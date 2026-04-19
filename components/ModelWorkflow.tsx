@@ -14,7 +14,8 @@ import {
     Check,
     RotateCcw,
     Undo2,
-    Redo2
+    Redo2,
+    AlertTriangle
 } from 'lucide-react';
 
 import FicheTechnique from './FicheTechnique';
@@ -25,15 +26,7 @@ import Balancing from './Balancing';
 import Implantation from './Implantation';
 import CostCalculator from './CostCalculator';
 
-import { Machine, Operation, ComplexityFactor, StandardTime, Guide, Poste, FicheData, Material, ChronoData, AppSettings } from '../types';
-
-// ManualLink type for Liaison (connection lines between workstations)
-interface ManualLink {
-    id: string;
-    from: string;
-    to: string;
-    label?: string;
-}
+import { Machine, Operation, ComplexityFactor, StandardTime, Guide, Poste, FicheData, Material, ChronoData, AppSettings, ManualLink } from '../types';
 
 interface ModelWorkflowProps {
     // Shared Data Props
@@ -44,6 +37,7 @@ interface ModelWorkflowProps {
     complexityFactors: ComplexityFactor[];
     standardTimes: StandardTime[];
     guides: Guide[];
+    setGuides: React.Dispatch<React.SetStateAction<Guide[]>>;
 
     // Project State
     articleName: string;
@@ -81,8 +75,10 @@ interface ModelWorkflowProps {
     // Layout Memory
     layoutMemory: Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>;
     setLayoutMemory: React.Dispatch<React.SetStateAction<Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>>>;
-    activeLayout: 'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line';
-    setActiveLayout: React.Dispatch<React.SetStateAction<'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line'>>;
+    activeLayout: 'zigzag' | 'free' | 'line' | 'double-zigzag';
+    setActiveLayout: React.Dispatch<React.SetStateAction<'zigzag' | 'free' | 'line' | 'double-zigzag'>>;
+    manualLinks: ManualLink[];
+    setManualLinks: React.Dispatch<React.SetStateAction<ManualLink[]>>;
 
     // Actions
     onSaveToLibrary: () => void;
@@ -136,7 +132,7 @@ const STEP_LABELS = {
 } as const;
 
 export default function ModelWorkflow({
-    machines, operations, setOperations, speedFactors, complexityFactors, standardTimes, guides,
+    machines, operations, setOperations, speedFactors, complexityFactors, standardTimes, guides, setGuides,
     articleName, setArticleName, efficiency, setEfficiency, numWorkers, setNumWorkers, presenceTime, setPresenceTime, bf, globalStats,
     ficheData, setFicheData, ficheImages, setFicheImages,
     assignments, setAssignments, postes, setPostes,
@@ -144,6 +140,7 @@ export default function ModelWorkflow({
     chronoData, setChronoData,
     layoutMemory, setLayoutMemory,
     activeLayout, setActiveLayout,
+    manualLinks, setManualLinks,
     onSaveToLibrary,
     onUndo, onRedo, canUndo, canRedo,
     lang = 'fr',
@@ -153,22 +150,21 @@ export default function ModelWorkflow({
 
     // Current Step State
     const [currentStep, setCurrentStep] = useState<'fiche' | 'gamme' | 'chrono' | 'analyse' | 'equilibrage' | 'implantation' | 'couts'>('fiche');
+    const [validationError, setValidationError] = useState<string | null>(null);
 
-    // MANUAL LINKS STATE (Lifted up from Implantation for persistence)
-    const [manualLinks, setManualLinks] = useState<ManualLink[]>(() => {
-        try {
-            const saved = localStorage.getItem('beramethode_manual_links');
-            return saved ? JSON.parse(saved) : [];
-        } catch { return []; }
-    });
+    const showValidationError = (msg: string) => {
+        setValidationError(msg);
+        setTimeout(() => setValidationError(null), 4000); // Increased to 4 seconds for better visibility
+    };
 
-    // Persist manualLinks to localStorage whenever they change
-    const handleSetManualLinks: React.Dispatch<React.SetStateAction<ManualLink[]>> = (action) => {
-        setManualLinks(prev => {
-            const next = typeof action === 'function' ? action(prev) : action;
-            localStorage.setItem('beramethode_manual_links', JSON.stringify(next));
-            return next;
-        });
+    const validateFiche = () => {
+        if (!articleName || !articleName.trim()) {
+            showValidationError(lang === 'ar' ? 'مرجع الموديل مطلوب' : 'La référence du modèle est obligatoire.');
+            return false;
+        }
+
+        // Category is optional - no validation needed
+        return true;
     };
 
     // FABRIC SETTINGS STATE (Lifted Up)
@@ -194,6 +190,7 @@ export default function ModelWorkflow({
 
     // Navigation Helper
     const navigateTo = (stepId: string) => {
+        if (currentStep === 'fiche' && stepId !== 'fiche' && !validateFiche()) return;
         setCurrentStep(stepId as any);
     };
 
@@ -207,18 +204,25 @@ export default function ModelWorkflow({
 
     // Linear "Next" Button (Process Flow)
     const handleLinearNext = () => {
-        // Check validation for Step 1
-        if (currentStep === 'fiche') {
-            if (!ficheData.category || !ficheData.category.trim()) {
-                alert("La catégorie du modèle est obligatoire (ex: T-Shirt, Robe...).");
-                return;
-            }
-        }
-
+        if (currentStep === 'fiche' && !validateFiche()) return;
         const currentIndex = steps.findIndex(s => s.id === currentStep);
         if (currentIndex < steps.length - 1) {
-            navigateTo(steps[currentIndex + 1].id);
+            setCurrentStep(steps[currentIndex + 1].id as any);
         }
+    };
+
+    const handleSave = () => {
+        if (!validateFiche()) {
+            if (currentStep !== 'fiche') setCurrentStep('fiche');
+            return;
+        }
+        onSaveToLibrary();
+    };
+
+    const handleSectionSplitChange = (enabled: boolean) => {
+        if (enabled) return;
+        // Turning split OFF forces all operations back to GLOBAL.
+        setOperations(prev => prev.map(op => ({ ...op, section: 'GLOBAL' })));
     };
 
     const currentIndex = steps.findIndex(s => s.id === currentStep);
@@ -295,7 +299,7 @@ export default function ModelWorkflow({
                 {/* RIGHT: ACTIONS (Detached) */}
                 <div className="flex items-center gap-2 shrink-0">
                     <button
-                        onClick={onSaveToLibrary}
+                        onClick={handleSave}
                         className="flex items-center gap-2 px-3 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold shadow-sm transition-all"
                         title={st.save}
                     >
@@ -304,7 +308,7 @@ export default function ModelWorkflow({
                     </button>
 
                     <button
-                        onClick={isLastStep ? onSaveToLibrary : handleLinearNext}
+                        onClick={isLastStep ? handleSave : handleLinearNext}
                         className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${isLastStep
                             ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200 hover:shadow-emerald-300'
                             : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 hover:shadow-indigo-300'
@@ -318,6 +322,15 @@ export default function ModelWorkflow({
 
             {/* CONTENT AREA */}
             <div className="flex-1 overflow-hidden relative bg-slate-50/50">
+                {/* FLOATING ERROR MESSAGE (4s with shake animation) */}
+                {validationError && (
+                    <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top-4 duration-300">
+                        <div className="bg-rose-600 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border-2 border-rose-400 backdrop-blur-sm animate-pulse">
+                            <AlertTriangle className="w-6 h-6 text-rose-100 animate-bounce" />
+                            <span className="font-black text-base tracking-wide">{validationError}</span>
+                        </div>
+                    </div>
+                )}
                 <div id="workflow-content" className="absolute inset-0 p-4 sm:p-6 lg:p-8 overflow-y-auto custom-scrollbar">
 
                     {currentStep === 'fiche' && (
@@ -330,6 +343,9 @@ export default function ModelWorkflow({
                             efficiency={efficiency} setEfficiency={setEfficiency}
                             images={ficheImages} setImages={setFicheImages}
                             onNext={handleLinearNext}
+                            onSectionSplitChange={handleSectionSplitChange}
+                            lang={lang}
+                            articleNameError={validationError?.includes(lang === 'ar' ? 'مرجع' : 'référence') || false}
                         />
                     )}
 
@@ -345,11 +361,15 @@ export default function ModelWorkflow({
                             complexityFactors={complexityFactors}
                             standardTimes={standardTimes}
                             guides={guides}
+                            setGuides={setGuides}
                             isAutocompleteEnabled={isAutocompleteEnabled}
                             userVocabulary={userVocabulary} setUserVocabulary={setUserVocabulary}
                             // Pass fabric settings
                             fabricSettings={fabricSettings}
                             setFabricSettings={setFabricSettings}
+                            sectionSplitEnabled={!!ficheData.sectionSplitEnabled}
+                            assignments={assignments}
+                            postes={postes}
                         />
                     )}
 
@@ -359,6 +379,12 @@ export default function ModelWorkflow({
                             chronoData={chronoData}
                             setChronoData={setChronoData}
                             presenceTime={presenceTime}
+                            bf={bf}
+                            numWorkers={numWorkers}
+                            efficiency={efficiency}
+                            machines={machines}
+                            assignments={assignments}
+                            postes={postes}
                         />
                     )}
 
@@ -375,6 +401,8 @@ export default function ModelWorkflow({
                             standardTimes={standardTimes}
                             // Pass fabric settings
                             fabricSettings={fabricSettings}
+                            assignments={assignments}
+                            postes={postes}
                         />
                     )}
 
@@ -412,7 +440,7 @@ export default function ModelWorkflow({
                             fabricSettings={fabricSettings}
                             onSave={onSaveToLibrary}
                             manualLinks={manualLinks}
-                            setManualLinks={handleSetManualLinks}
+                            setManualLinks={setManualLinks}
                         />
                     )}
 

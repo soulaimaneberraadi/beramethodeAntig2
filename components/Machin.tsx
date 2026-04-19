@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Scissors, 
   Plus, 
@@ -79,6 +80,12 @@ export default function Machin({
   const [complexityForm, setComplexityForm] = useState<Partial<ComplexityFactor>>({ label: '', value: 1.0 });
   const [timeForm, setTimeForm] = useState<Partial<StandardTime>>({ label: '', value: 0, unit: 'min' });
   const [guideForm, setGuideForm] = useState<Partial<Guide>>({ name: '', category: '', machineType: '', description: '', useCase: '' });
+  const [machineErrors, setMachineErrors] = useState<{ name: boolean; classe: boolean }>({ name: false, classe: false });
+  const [guideErrors, setGuideErrors] = useState<{ name: boolean; category: boolean; machineType: boolean }>({
+    name: false,
+    category: false,
+    machineType: false,
+  });
 
   // Filter Logic
   const filteredMachines = useMemo(() => {
@@ -126,6 +133,7 @@ export default function Machin({
   // --- HANDLERS ---
   const openMachineModal = (machine?: Machine) => {
     setModalType('machine');
+    setMachineErrors({ name: false, classe: false });
     if (machine) {
       setEditingItem(machine);
       setMachineForm(machine);
@@ -137,7 +145,12 @@ export default function Machin({
 
   const saveMachine = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!machineForm.name || !machineForm.classe) return;
+    const nextErrors = {
+      name: !(machineForm.name || '').trim(),
+      classe: !(machineForm.classe || '').trim(),
+    };
+    setMachineErrors(nextErrors);
+    if (nextErrors.name || nextErrors.classe) return;
     const toSave: Machine = { ...(machineForm as Machine), id: editingItem?.id || Date.now().toString() };
     onSave(toSave);
     closeModal();
@@ -211,6 +224,7 @@ export default function Machin({
 
   const openGuideModal = (item?: Guide) => {
     setModalType('guide');
+    setGuideErrors({ name: false, category: false, machineType: false });
     if (item) {
       setEditingItem(item);
       setGuideForm(item);
@@ -222,7 +236,13 @@ export default function Machin({
 
   const saveGuide = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!guideForm.name) return;
+    const nextErrors = {
+      name: !(guideForm.name || '').trim(),
+      category: !(guideForm.category || '').trim(),
+      machineType: !(guideForm.machineType || '').trim(),
+    };
+    setGuideErrors(nextErrors);
+    if (nextErrors.name || nextErrors.category || nextErrors.machineType) return;
     const toSave: Guide = { ...(guideForm as Guide), id: editingItem?.id || Date.now().toString() };
     if (editingItem) {
       setGuides(prev => prev.map(i => i.id === editingItem.id ? toSave : i));
@@ -235,6 +255,8 @@ export default function Machin({
   const closeModal = () => {
     setModalType(null);
     setEditingItem(null);
+    setMachineErrors({ name: false, classe: false });
+    setGuideErrors({ name: false, category: false, machineType: false });
   };
 
   const confirmDelete = () => {
@@ -644,10 +666,10 @@ export default function Machin({
       )}
 
       {/* ... MODALS ... */}
-      {modalType && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm" onClick={closeModal} />
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      {modalType && createPortal(
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-md" onClick={closeModal} />
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200/70">
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
                 {editingItem ? <Edit2 className="w-4 h-4 text-emerald-600" /> : <Plus className="w-4 h-4 text-emerald-600" />}
@@ -663,11 +685,38 @@ export default function Machin({
             <div className="p-6">
                 {modalType === 'machine' && (
                 <form onSubmit={saveMachine} className="space-y-4">
-                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nom</label><input type="text" required value={machineForm.name} onChange={e => setMachineForm({...machineForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-emerald-500 transition-all" /></div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nom</label>
+                    <input
+                      type="text"
+                      value={machineForm.name}
+                      onChange={e => {
+                        setMachineForm({...machineForm, name: e.target.value});
+                        if (machineErrors.name) setMachineErrors(prev => ({ ...prev, name: false }));
+                      }}
+                      className={`w-full rounded-xl px-3 py-2.5 text-slate-700 outline-none transition-all ${machineErrors.name ? 'bg-rose-50 border border-rose-300 focus:border-rose-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+                    />
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Classe</label><input type="text" required value={machineForm.classe} onChange={e => setMachineForm({...machineForm, classe: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-emerald-500 transition-all" /></div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Classe</label>
+                      <input
+                        type="text"
+                        value={machineForm.classe}
+                        onChange={e => {
+                          setMachineForm({...machineForm, classe: e.target.value});
+                          if (machineErrors.classe) setMachineErrors(prev => ({ ...prev, classe: false }));
+                        }}
+                        className={`w-full rounded-xl px-3 py-2.5 text-slate-700 outline-none transition-all ${machineErrors.classe ? 'bg-rose-50 border border-rose-300 focus:border-rose-500' : 'bg-slate-50 border border-slate-200 focus:border-emerald-500'}`}
+                      />
+                    </div>
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Vitesse</label><input type="number" required value={machineForm.speed} onChange={e => setMachineForm({...machineForm, speed: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-emerald-500 transition-all" /></div>
                   </div>
+                  {(machineErrors.name || machineErrors.classe) && (
+                    <p className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                      Remplissez les champs obligatoires en rouge avant d'enregistrer.
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Majoration</label><input type="number" step="0.01" required value={machineForm.speedMajor} onChange={e => setMachineForm({...machineForm, speedMajor: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-emerald-500 transition-all" /></div>
                     <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">COFS</label><input type="number" step="0.01" required value={machineForm.cofs} onChange={e => setMachineForm({...machineForm, cofs: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-emerald-500 transition-all" /></div>
@@ -710,12 +759,33 @@ export default function Machin({
               )}
               {modalType === 'guide' && (
                 <form onSubmit={saveGuide} className="space-y-4">
-                  <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nom</label><input type="text" required value={guideForm.name} onChange={e => setGuideForm({...guideForm, name: e.target.value})} placeholder="Ex: Pied Téflon" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-orange-500 transition-all" /></div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Nom</label>
+                    <input
+                      type="text"
+                      value={guideForm.name}
+                      onChange={e => {
+                        setGuideForm({...guideForm, name: e.target.value});
+                        if (guideErrors.name) setGuideErrors(prev => ({ ...prev, name: false }));
+                      }}
+                      placeholder="Ex: Pied Téflon"
+                      className={`w-full rounded-xl px-3 py-2.5 text-slate-700 outline-none transition-all ${guideErrors.name ? 'bg-rose-50 border border-rose-300 focus:border-rose-500' : 'bg-slate-50 border border-slate-200 focus:border-orange-500'}`}
+                    />
+                  </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                       <div>
                           <label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Catégorie</label>
-                          <input list="guide-categories" type="text" required value={guideForm.category} onChange={e => setGuideForm({...guideForm, category: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-orange-500 transition-all" />
+                          <input
+                            list="guide-categories"
+                            type="text"
+                            value={guideForm.category}
+                            onChange={e => {
+                              setGuideForm({...guideForm, category: e.target.value});
+                              if (guideErrors.category) setGuideErrors(prev => ({ ...prev, category: false }));
+                            }}
+                            className={`w-full rounded-xl px-3 py-2.5 text-slate-700 outline-none transition-all ${guideErrors.category ? 'bg-rose-50 border border-rose-300 focus:border-rose-500' : 'bg-slate-50 border border-slate-200 focus:border-orange-500'}`}
+                          />
                           <datalist id="guide-categories">
                               <option value="Surpiqûre & Précision" />
                               <option value="Matières Difficiles" />
@@ -733,9 +803,12 @@ export default function Machin({
                             list="machine-suggestions" 
                             type="text" 
                             value={guideForm.machineType} 
-                            onChange={e => setGuideForm({...guideForm, machineType: e.target.value})} 
+                            onChange={e => {
+                              setGuideForm({...guideForm, machineType: e.target.value});
+                              if (guideErrors.machineType) setGuideErrors(prev => ({ ...prev, machineType: false }));
+                            }}
                             placeholder="Ex: Piqueuse Plate (301)" 
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-orange-500 transition-all" 
+                            className={`w-full rounded-xl px-3 py-2.5 text-slate-700 outline-none transition-all ${guideErrors.machineType ? 'bg-rose-50 border border-rose-300 focus:border-rose-500' : 'bg-slate-50 border border-slate-200 focus:border-orange-500'}`}
                           />
                           <datalist id="machine-suggestions">
                             {machines.map(m => (
@@ -745,6 +818,11 @@ export default function Machin({
                         </div>
                       </div>
                   </div>
+                  {(guideErrors.name || guideErrors.category || guideErrors.machineType) && (
+                    <p className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                      Champs obligatoires: Nom, Categorie et Machine.
+                    </p>
+                  )}
 
                   <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Description</label><textarea rows={2} value={guideForm.description} onChange={e => setGuideForm({...guideForm, description: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-orange-500 transition-all resize-none" /></div>
                   <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1.5">Utilisation (Cas typiques)</label><input type="text" value={guideForm.useCase} onChange={e => setGuideForm({...guideForm, useCase: e.target.value})} placeholder="Ex: Cuir, Simili..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 outline-none focus:border-orange-500 transition-all" /></div>
@@ -754,13 +832,14 @@ export default function Machin({
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* DELETE MODAL */}
-      {deleteData && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDeleteData(null)} />
+      {deleteData && createPortal(
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-md" onClick={() => setDeleteData(null)} />
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 text-center">
             <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 text-rose-600"><AlertTriangle className="w-6 h-6" /></div>
             <h3 className="text-lg font-bold text-slate-800 mb-2">Supprimer l'élément ?</h3>
@@ -770,7 +849,8 @@ export default function Machin({
               <button onClick={confirmDelete} className="flex-1 px-4 py-2.5 rounded-xl bg-rose-600 text-white font-medium hover:bg-rose-700 shadow-lg shadow-rose-200 transition-all active:scale-95">Supprimer</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

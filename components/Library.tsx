@@ -32,6 +32,52 @@ import {
 } from 'lucide-react';
 import { ModelData } from '../types';
 
+/** Texte indexé pour la recherche (fiche, méta, lignes de gamme, temps, quantités). */
+function buildLibrarySearchHaystack(m: ModelData): string {
+    const parts: string[] = [];
+    const meta = m.meta_data;
+    const fd = m.ficheData;
+
+    parts.push(meta.nom_modele || '', m.filename || '', meta.reference || '');
+    parts.push(meta.category || '', fd?.category || '');
+    parts.push(fd?.client || '', fd?.designation || '', fd?.observations || '', fd?.chaine || '');
+    if (fd?.sizes?.length) parts.push(fd.sizes.join(' '));
+    if (fd?.colors?.length) parts.push(...fd.colors.map(c => c.name));
+    parts.push(
+        String(meta.quantity ?? fd?.quantity ?? ''),
+        String(meta.effectif ?? ''),
+        String(meta.total_temps ?? ''),
+        fd?.date ?? ''
+    );
+
+    const ops = m.gamme_operatoire || [];
+    for (const op of ops) {
+        parts.push(
+            op.description || '',
+            op.machineName || '',
+            op.machineId || '',
+            op.guideName || '',
+            String(op.time ?? ''),
+            op.forcedTime != null ? String(op.forcedTime) : ''
+        );
+    }
+
+    return parts.join(' \n ');
+}
+
+/** Tous les mots saisis doivent apparaître quelque part (ET). Les chiffres matchent dans les temps / qtés. */
+function modelMatchesLibrarySearch(m: ModelData, rawQuery: string): boolean {
+    const q = rawQuery.trim();
+    if (!q) return true;
+    const haystack = buildLibrarySearchHaystack(m).toLowerCase();
+    const tokens = q
+        .toLowerCase()
+        .split(/\s+/)
+        .map(t => t.replace(/[,;]+$/g, ''))
+        .filter(Boolean);
+    return tokens.every(tok => haystack.includes(tok));
+}
+
 interface LibraryProps {
     models: ModelData[];
     onLoadModel: (model: ModelData) => void;
@@ -253,11 +299,7 @@ export default function Library({
     // --- FILTER & SORT ---
     const filteredModels = models
         .filter(m => m.isPublishedToLibrary !== false)
-        .filter(m =>
-            m.meta_data.nom_modele.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (m.meta_data.category || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-            m.filename.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        .filter(m => modelMatchesLibrarySearch(m, searchQuery))
         .sort((a, b) => {
             if (sortBy === 'date') return new Date(b.meta_data.date_creation).getTime() - new Date(a.meta_data.date_creation).getTime();
             if (sortBy === 'name') return a.meta_data.nom_modele.localeCompare(b.meta_data.nom_modele);
@@ -361,14 +403,15 @@ export default function Library({
                             </button>
                         </div>
 
-                        {/* Search */}
-                        <div className="relative flex-1 min-w-[150px] xl:w-40">
+                        {/* Search : mots cumulés (ET) — indexe fiche + gamme */}
+                        <div className="relative flex-1 min-w-[150px] xl:min-w-[220px]">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                             <input
                                 type="text"
-                                placeholder="Rechercher..."
+                                placeholder="Nom, client, mot gamme, chiffre…"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
+                                title="Plusieurs mots : chaque mot doit être trouvé (fiche + lignes de gamme)."
                                 className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 focus:bg-white transition-all"
                             />
                         </div>

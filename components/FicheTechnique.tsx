@@ -1,5 +1,6 @@
 
-import React, { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
     Calendar,
     User,
@@ -23,7 +24,6 @@ import {
     Trash2,
     ArrowRight,
     Grid3X3,
-    Coins,
     Palette,
     ChevronDown,
     LayoutGrid,
@@ -33,6 +33,55 @@ import { FicheData } from '../types';
 import { TEXTILE_COLORS, TEXTILE_FABRICS } from '../data/textileData';
 import ExcelInput from './ExcelInput';
 import { compressImage } from '../utils';
+
+const LAUNCH_HOUR_OPTS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+// Only multiples of 5 (00, 05, 10 … 55) — 12 options, no scroll needed
+const LAUNCH_MINUTE_OPTS = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
+
+const FICHE_LABELS = {
+    fr: {
+        identification: 'Identification',
+        client: 'Client',
+        clientPlaceholder: 'Nom du Client',
+        modelRef: 'Modèle / Réf',
+        modelPlaceholder: 'Référence Modèle',
+        category: 'Catégorie',
+        optional: 'facultatif',
+        categoryPlaceholder: 'Famille produit (ex. T-Shirt)',
+        categoryHelp: 'Laisse vide si besoin : tu peux passer aux étapes suivantes et enregistrer sans catégorie.',
+        launchTitle: 'Date & heure de lancement',
+        chooseDate: 'Choisir une date',
+        pickLaunchTime: 'Choisir l’heure de lancement',
+        timePickerDialog: 'Grille heure et minutes',
+        hoursHeading: 'Heures (24h)',
+        minutesHeading: 'Minutes',
+        badge24h: '24h',
+        launchHelp: 'Heure en 24 h — alignée avec le Planning et le Suivi à l’enregistrement du modèle.',
+        matiere: 'Matière Principale / Désignation',
+        matierePlaceholder: 'Rechercher un tissu (ex: Popeline, Denim, Jersey...)',
+    },
+    ar: {
+        identification: 'التعريف',
+        client: 'العميل',
+        clientPlaceholder: 'اسم العميل',
+        modelRef: 'الموديل / المرجع',
+        modelPlaceholder: 'مرجع الموديل',
+        category: 'الفئة',
+        optional: 'اختياري',
+        categoryPlaceholder: 'عائلة المنتج (مثال: T-Shirt)',
+        categoryHelp: 'يمكن تركه فارغًا: المتابعة إلى المراحل التالية والحفظ دون فئة.',
+        launchTitle: 'تاريخ ووقت الانطلاق',
+        chooseDate: 'اختر تاريخًا',
+        pickLaunchTime: 'اختر وقت الانطلاق',
+        timePickerDialog: 'جدول الساعات والدقائق',
+        hoursHeading: 'ساعات (24)',
+        minutesHeading: 'دقائق',
+        badge24h: '24',
+        launchHelp: 'توقيت 24 ساعة — يتوافق مع التخطيط والمتابعة عند حفظ النموذج.',
+        matiere: 'المادة الرئيسية / التسمية',
+        matierePlaceholder: 'بحث عن قماش (مثال: Popeline، Denim...)',
+    },
+} as const;
 
 interface FicheTechniqueProps {
     data: FicheData;
@@ -53,6 +102,9 @@ interface FicheTechniqueProps {
 
     // Nav - Not used anymore but kept in interface for compatibility if passed
     onNext?: () => void;
+    onSectionSplitChange?: (enabled: boolean) => void;
+    lang?: 'fr' | 'ar';
+    articleNameError?: boolean;
 }
 
 export default function FicheTechnique({
@@ -68,8 +120,13 @@ export default function FicheTechnique({
     setEfficiency,
     images,
     setImages,
-    onNext
+    onNext,
+    onSectionSplitChange,
+    lang = 'fr',
+    articleNameError
 }: FicheTechniqueProps) {
+
+    const ft = FICHE_LABELS[lang];
 
     const frontInputRef = useRef<HTMLInputElement>(null);
     const backInputRef = useRef<HTMLInputElement>(null);
@@ -79,6 +136,19 @@ export default function FicheTechnique({
 
     // -- Image Preview Modal State --
     const [previewImage, setPreviewImage] = useState<{ src: string, title: string } | null>(null);
+    useEffect(() => {
+        if (!previewImage) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setPreviewImage(null);
+        };
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    }, [previewImage]);
 
     // -- MATRIX STATE --
     const sizes = data.sizes || [];
@@ -108,18 +178,6 @@ export default function FicheTechnique({
             gridQuantities: typeof updater === 'function' ? updater(prev.gridQuantities || {}) : updater
         }));
     };
-
-    // Local state for smooth decimal typing in cost fields
-    const [localCostMinute, setLocalCostMinute] = useState<string>(data.costMinute?.toString() || '');
-
-    // Sync local input when external data changes
-    useEffect(() => {
-        // Only update local state if the numeric value is different (handles external updates)
-        // but respects current typing (avoids cursor jump or formatting interrupt)
-        if (data.costMinute !== parseFloat(localCostMinute) && !(localCostMinute === '' && data.costMinute === 0)) {
-            setLocalCostMinute(data.costMinute?.toString() || '');
-        }
-    }, [data.costMinute]);
 
     // Sync calculated Unit Cost back to data
     useEffect(() => {
@@ -177,18 +235,61 @@ export default function FicheTechnique({
         setData(prev => ({ ...prev, [field]: value }));
     };
 
-    const handleCostMinuteChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const val = e.target.value;
-        setLocalCostMinute(val);
+    const launchHM = useMemo(() => {
+        const raw = (data.launchTime ?? '08:00').trim();
+        const m = /^(\d{1,2}):(\d{2})$/.exec(raw);
+        if (!m) return { h: '08', min: '00' };
+        const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+        const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+        return { h: String(h).padStart(2, '0'), min: String(min).padStart(2, '0') };
+    }, [data.launchTime]);
 
-        const num = parseFloat(val);
-        // If it's a valid number, update the global data
-        if (!isNaN(num)) {
-            handleChange('costMinute', num);
-        } else if (val === '') {
-            handleChange('costMinute', 0);
-        }
-    };
+    const [launchTimeOpen, setLaunchTimeOpen] = useState(false);
+    const [launchPopPos, setLaunchPopPos] = useState({ top: 0, left: 0, width: 280 });
+    const launchTimePickerRef = useRef<HTMLDivElement>(null);
+    const launchTimeBtnRef = useRef<HTMLButtonElement>(null);
+    const launchTimePopRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        if (!launchTimeOpen || !launchTimeBtnRef.current) return;
+        const update = () => {
+            const el = launchTimeBtnRef.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            const w = 320;
+            // Center under the button when possible
+            let left = r.left + (r.width - w) / 2;
+            if (left < 12) left = 12;
+            if (left + w > window.innerWidth - 12) left = window.innerWidth - w - 12;
+            setLaunchPopPos({ top: r.bottom + 8, left, width: w });
+        };
+        update();
+        window.addEventListener('scroll', update, true);
+        window.addEventListener('resize', update);
+        return () => {
+            window.removeEventListener('scroll', update, true);
+            window.removeEventListener('resize', update);
+        };
+    }, [launchTimeOpen]);
+
+    useEffect(() => {
+        if (!launchTimeOpen) return;
+        const onDoc = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (launchTimePickerRef.current?.contains(t)) return;
+            if (launchTimePopRef.current?.contains(t)) return;
+            setLaunchTimeOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setLaunchTimeOpen(false);
+        };
+        document.addEventListener('mousedown', onDoc);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onDoc);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [launchTimeOpen]);
 
     // Matrix Actions
     const addSize = () => {
@@ -307,97 +408,195 @@ export default function FicheTechnique({
                         <div className="bg-slate-50/50 px-6 py-3 border-b border-slate-100 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <Tag className="w-4 h-4 text-indigo-500" />
-                                <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide">Identification</h3>
+                                <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide">{ft.identification}</h3>
                             </div>
                         </div>
                         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">Client</label>
+                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">{ft.client}</label>
                                 <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all">
                                     <User className="w-4 h-4 text-slate-400" />
                                     <input
                                         type="text"
                                         value={data.client}
                                         onChange={(e) => handleChange('client', e.target.value)}
-                                        placeholder="Nom du Client"
+                                        placeholder={ft.clientPlaceholder}
                                         className="w-full bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300"
                                     />
                                 </div>
                             </div>
                             <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">Modèle / Réf</label>
-                                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all">
-                                    <Shirt className="w-4 h-4 text-slate-400" />
+                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">{ft.modelRef}</label>
+                                <div className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all ${articleNameError 
+                                    ? 'bg-rose-50 border-2 border-rose-300 focus-within:ring-2 focus-within:ring-rose-100' 
+                                    : 'bg-slate-50 border border-slate-200 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400'}`}>
+                                    <Shirt className={`w-4 h-4 ${articleNameError ? 'text-rose-500' : 'text-slate-400'}`} />
                                     <input
                                         type="text"
                                         value={articleName}
                                         onChange={(e) => setArticleName(e.target.value)}
-                                        placeholder="Référence Modèle"
+                                        placeholder={ft.modelPlaceholder}
                                         className="w-full bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300"
                                     />
                                 </div>
                             </div>
 
-                            {/* Category Field */}
+                            {/* Category Field (Optional) */}
                             <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-400 uppercase ml-1 flex items-center gap-1">
-                                    Catégorie <span className="text-rose-500">*</span>
-                                </label>
-                                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all">
+                                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 ml-1">
+                                    <label className="text-xs font-bold text-slate-400 uppercase">{ft.category}</label>
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{ft.optional}</span>
+                                </div>
+                                <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all bg-slate-50 border border-slate-200 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400">
                                     <LayoutGrid className="w-4 h-4 text-slate-400" />
                                     <ExcelInput
                                         suggestions={["T-Shirt", "Polo", "Chemise", "Pantalon", "Robe", "Veste", "Sweat", "Short", "Jupe", "Pyjama", "Sous-vêtement"]}
                                         value={data.category}
                                         onChange={(val) => handleChange('category', val)}
-                                        placeholder="Famille produit"
+                                        placeholder={ft.categoryPlaceholder}
                                         className="w-full bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300"
                                     />
                                 </div>
                             </div>
 
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">Date Lancement</label>
-                                <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all">
-                                    {/* Calendar Trigger: Invisible Overlay Technique */}
-                                    <div className="relative group">
-                                        <div className="p-1.5 bg-white rounded-lg text-indigo-500 shadow-sm border border-indigo-100 group-hover:bg-indigo-50 transition-colors pointer-events-none">
-                                            <Calendar className="w-4 h-4" />
+                            <div className="space-y-1 md:col-span-2">
+                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">{ft.launchTitle}</label>
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                    <div className="flex flex-1 min-w-0 items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all">
+                                        <div className="relative group shrink-0">
+                                            <div className="p-1.5 bg-white rounded-lg text-indigo-500 shadow-sm border border-indigo-100 group-hover:bg-indigo-50 transition-colors pointer-events-none">
+                                                <Calendar className="w-4 h-4" />
+                                            </div>
+                                            <input
+                                                type="date"
+                                                value={data.date}
+                                                onChange={(e) => handleChange('date', e.target.value)}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                                title={ft.chooseDate}
+                                            />
                                         </div>
-                                        {/* The invisible input sits on top of the icon. Clicking it opens the native picker immediately. */}
                                         <input
                                             type="date"
                                             value={data.date}
                                             onChange={(e) => handleChange('date', e.target.value)}
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                            title="Choisir une date"
+                                            className="w-full min-w-0 bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 font-mono date-input-modern"
                                         />
                                     </div>
+                                    <div
+                                        ref={launchTimePickerRef}
+                                        className={`relative flex flex-1 min-w-0 items-center gap-2 sm:gap-3 rounded-xl border bg-slate-50 px-3 py-2.5 shadow-sm transition ${launchTimeOpen ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'}`}
+                                    >
+                                        <Clock className="h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
+                                        <div className="relative min-w-0 flex-1">
+                                            <button
+                                                ref={launchTimeBtnRef}
+                                                type="button"
+                                                aria-expanded={launchTimeOpen}
+                                                aria-haspopup="dialog"
+                                                aria-label={ft.pickLaunchTime}
+                                                onClick={() => setLaunchTimeOpen((o) => !o)}
+                                                className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-2 text-left shadow-sm outline-none transition hover:border-indigo-200 focus-visible:border-indigo-400 focus-visible:ring-2 focus-visible:ring-indigo-100"
+                                            >
+                                                <span className="font-mono text-sm font-bold tracking-tight text-slate-800">
+                                                    {launchHM.h}:{launchHM.min}
+                                                </span>
+                                                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${launchTimeOpen ? 'rotate-180' : ''}`} aria-hidden />
+                                            </button>
+                                        </div>
+                                        <span className="hidden shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400 sm:inline">{ft.badge24h}</span>
+                                    </div>
+                                </div>
+                                {launchTimeOpen && createPortal(
+                                    <div
+                                        ref={launchTimePopRef}
+                                        role="dialog"
+                                        aria-label={ft.timePickerDialog}
+                                        style={{
+                                            position: 'fixed',
+                                            top: launchPopPos.top,
+                                            left: launchPopPos.left,
+                                            width: Math.max(launchPopPos.width, 300),
+                                            zIndex: 9999
+                                        }}
+                                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/50 ring-1 ring-black/5"
+                                    >
+                                        {/* Compact Header */}
+                                        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2">
+                                            <div>
+                                                <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">HEURE DE LANCEMENT</span>
+                                            </div>
+                                            <div className="font-mono text-lg font-black text-indigo-600 bg-white px-3 py-0.5 rounded-xl shadow-sm border border-indigo-100">
+                                                {launchHM.h}:{launchHM.min}
+                                            </div>
+                                        </div>
 
-                                    {/* Manual Entry Input */}
-                                    <input
-                                        type="date"
-                                        value={data.date}
-                                        onChange={(e) => handleChange('date', e.target.value)}
-                                        className="w-full bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 font-mono date-input-modern"
-                                    />
-                                    {/* CSS to hide default calendar picker indicator on the text input so it looks clean */}
-                                    <style>{`
+                                        <div className="p-4 space-y-4">
+                                            {/* Native time picker — clavier + roue, plus rapide */}
+                                            <div>
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Saisie directe</label>
+                                                <input
+                                                    type="time"
+                                                    step={300}
+                                                    value={`${launchHM.h}:${launchHM.min}`}
+                                                    onChange={(e) => handleChange('launchTime', e.target.value)}
+                                                    className="w-full bg-slate-50 border-2 border-slate-200 focus:border-indigo-500 rounded-xl px-4 py-3 font-mono font-black text-2xl text-center text-slate-800 outline-none transition-colors"
+                                                />
+                                                <p className="text-[10px] text-slate-400 mt-1 text-center">Pas de 5 minutes</p>
+                                            </div>
+
+                                            {/* Quick presets — démarrages fréquents */}
+                                            <div>
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Raccourcis</label>
+                                                <div className="grid grid-cols-3 gap-1.5">
+                                                    {['06:00', '07:00', '08:00', '08:30', '09:00', '14:00'].map(t => {
+                                                        const active = `${launchHM.h}:${launchHM.min}` === t;
+                                                        return (
+                                                            <button
+                                                                key={t}
+                                                                onClick={() => { handleChange('launchTime', t); setLaunchTimeOpen(false); }}
+                                                                className={`py-2 text-xs font-mono font-bold rounded-lg transition-all ${active
+                                                                    ? 'bg-indigo-600 text-white shadow'
+                                                                    : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700'}`}
+                                                            >
+                                                                {t}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400 py-2 px-4 border-t border-slate-100 bg-slate-50">
+                                            <span>Tab/flèches pour ajuster</span>
+                                            <button
+                                                onClick={() => setLaunchTimeOpen(false)}
+                                                className="px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold hover:bg-indigo-500"
+                                            >
+                                                OK
+                                            </button>
+                                        </div>
+                                    </div>,
+                                    document.body
+                                )}
+                                <p className="text-[10px] text-slate-500 ml-1">
+                                    {ft.launchHelp}
+                                </p>
+                                <style>{`
                                 .date-input-modern::-webkit-calendar-picker-indicator {
                                     display: none;
                                 }
                             `}</style>
-                                </div>
                             </div>
 
                             <div className="md:col-span-2 space-y-1">
-                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">Matière Principale / Désignation</label>
+                                <label className="text-xs font-bold text-slate-400 uppercase ml-1">{ft.matiere}</label>
                                 <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all relative">
                                     <Layers className="w-4 h-4 text-slate-400 z-20 relative" />
                                     <ExcelInput
                                         suggestions={TEXTILE_FABRICS}
                                         value={data.designation}
                                         onChange={(val) => handleChange('designation', val)}
-                                        placeholder="Rechercher un tissu (ex: Popeline, Denim, Jersey...)"
+                                        placeholder={ft.matierePlaceholder}
                                         className="w-full bg-transparent text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 pl-9 pr-3"
                                         containerClassName="absolute inset-0 flex items-center"
                                     />
@@ -584,7 +783,6 @@ export default function FicheTechnique({
                         <div className="bg-emerald-50/50 px-6 py-3 border-b border-emerald-100 flex items-center gap-2">
                             <Factory className="w-4 h-4 text-emerald-600" />
                             <h3 className="font-bold text-emerald-800 text-sm uppercase tracking-wide">Données Techniques & Production</h3>
-                            <span className="ml-auto text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">LIVE SYNC</span>
                         </div>
                         <div className="p-6">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
@@ -659,20 +857,6 @@ export default function FicheTechnique({
 
                             {/* Costing Footer */}
                             <div className="mt-6 pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                <div className="space-y-1">
-                                    <label className="text-xs font-bold text-blue-500 uppercase ml-1">Coût Minute (DH)</label>
-                                    <div className="flex items-center gap-2">
-                                        <Coins className="w-4 h-4 text-blue-400" />
-                                        <input
-                                            type="number" step="0.01"
-                                            value={localCostMinute}
-                                            onChange={handleCostMinuteChange}
-                                            className="bg-transparent font-mono font-bold text-blue-600 outline-none w-24 border-b border-blue-200 focus:border-blue-500"
-                                            placeholder="0.00"
-                                        />
-                                        <span className="text-xs font-bold text-slate-400">DH</span>
-                                    </div>
-                                </div>
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-400 uppercase ml-1">Prix Client</label>
                                     <div className="flex items-center gap-2">
@@ -769,6 +953,31 @@ export default function FicheTechnique({
                         </div>
                     </div>
 
+                    {/* SECTION SPLIT TOGGLE */}
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex items-center justify-between gap-4">
+                        <div>
+                            <div className="text-xs font-bold text-slate-500 uppercase">Mode Préparation / Montage</div>
+                            {data.sectionSplitEnabled && (
+                                <div className="text-[11px] text-slate-500 mt-1">
+                                    Séparation active: flux, effectifs, dates et rendement distincts.
+                                </div>
+                            )}
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="sr-only peer"
+                                checked={!!data.sectionSplitEnabled}
+                                onChange={(e) => {
+                                    const enabled = e.target.checked;
+                                    handleChange('sectionSplitEnabled' as any, enabled as any);
+                                    onSectionSplitChange?.(enabled);
+                                }}
+                            />
+                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+
                     {/* OBSERVATIONS */}
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col">
                         <label className="text-xs font-bold text-slate-500 uppercase mb-2">Observations (Echantillon)</label>
@@ -784,23 +993,41 @@ export default function FicheTechnique({
                 </div>
             </div>
 
-            {/* IMAGE PREVIEW MODAL */}
-            {previewImage && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setPreviewImage(null)}>
-                    <div className="relative max-w-4xl max-h-[90vh] w-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
-                        <div className="absolute top-4 right-4 z-10">
-                            <button onClick={() => setPreviewImage(null)} className="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors">
-                                <X className="w-6 h-6" />
+            {/* IMAGE PREVIEW MODAL — portaled to body so z-index is always on top */}
+            {previewImage && createPortal(
+                <div
+                    className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/60 p-3 animate-in fade-in duration-200 sm:p-6"
+                    onClick={() => setPreviewImage(null)}
+                >
+                    <div
+                        className="relative flex w-full max-w-5xl max-h-[92vh] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.45)]"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-4 py-3 sm:px-5">
+                            <div className="min-w-0">
+                                <h3 className="truncate text-base font-black tracking-wide text-slate-800 sm:text-lg">{previewImage.title}</h3>
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Aperçu haute résolution</p>
+                            </div>
+                            <button
+                                onClick={() => setPreviewImage(null)}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                            >
+                                <X className="h-4 w-4" />
+                                Fermer
                             </button>
                         </div>
-                        <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white">
-                            <h3 className="font-bold text-lg text-slate-800">{previewImage.title}</h3>
+                        <div className="relative flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#e2e8f0_100%)] p-3 sm:p-5">
+                            <div className="mx-auto flex min-h-full max-w-[92%] items-center justify-center rounded-2xl border border-white/80 bg-white/60 p-2 shadow-inner sm:p-4">
+                                <img src={previewImage.src} alt="Full Preview" className="max-h-[74vh] w-auto max-w-full rounded-xl border border-slate-200 bg-white object-contain shadow-xl" />
+                            </div>
                         </div>
-                        <div className="flex-1 bg-slate-100 flex items-center justify-center p-4 overflow-auto">
-                            <img src={previewImage.src} alt="Full Preview" className="max-w-full max-h-[75vh] object-contain shadow-lg rounded" />
+                        <div className="border-t border-slate-200 bg-white px-4 py-2 text-center text-[11px] font-medium text-slate-500 sm:px-5">
+                            Cliquer en dehors ou appuyer sur <span className="font-bold text-slate-700">Esc</span> pour fermer
                         </div>
+                        <div className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/50" />
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
         </div>

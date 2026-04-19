@@ -61,7 +61,19 @@ export type Operation = {
   groupId?: string; // Link operations together (visual grouping)
   targetOperationId?: string; // New: Defines the destination flow (Preparation -> Montage)
   side?: 'G' | 'D' | 'GD'; // New: Side of operation (Gauche, Droite, Gauche/Droite)
+  section?: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
 };
+
+export interface SectionSettings {
+  efficiency: number;
+  numWorkers: number;
+}
+
+export interface ModelSectionSettings {
+  global: SectionSettings;
+  preparation: SectionSettings;
+  montage: SectionSettings;
+}
 
 export type AutoMachine = {
   id: string;
@@ -78,6 +90,7 @@ export type Poste = {
   originalId?: string; // Links split physical posts (P1.1, P1.2) back to logical group (P1)
   name: string;
   machine: string;
+  dominantSection?: 'PREPARATION' | 'MONTAGE' | 'GLOBAL';
   operatorName?: string;
   notes?: string;
   timeOverride?: number;
@@ -110,6 +123,8 @@ export type SavedLayout = {
 
 export type FicheData = {
   date: string;
+  /** Heure de lancement (HH:mm), alignée Planning / Suivi */
+  launchTime?: string;
   client: string;
   category: string;
   designation: string;
@@ -121,6 +136,8 @@ export type FicheData = {
   clientPrice: number;
   observations: string;
   costMinute: number;
+  sectionSplitEnabled?: boolean;
+  sectionSettings?: ModelSectionSettings;
   sizes?: string[];
   colors?: { id: string, name: string }[];
   gridQuantities?: Record<string, number>;
@@ -233,6 +250,7 @@ export interface ModelData {
     category?: string;
     date_creation: string;
     date_lancement?: string;
+    heure_lancement?: string;
     total_temps: number;
     effectif: number;
     sizes?: string[];
@@ -246,7 +264,8 @@ export interface ModelData {
     postes: Poste[];
     assignments: Record<string, string[]>;
     layoutMemory?: Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>;
-    activeLayout?: 'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line'; // NEW: Persist active layout
+    activeLayout?: 'zigzag' | 'free' | 'line' | 'double-zigzag';
+    manualLinks?: ManualLink[];
     savedPlantations?: { id: string, name: string, date: string, layoutType: string, postes: { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[] }[]; // NEW: Manual saves
   };
 }
@@ -260,7 +279,14 @@ export type ChronoData = {
   tr3?: number;
   tr4?: number;
   tr5?: number;
+  tr6?: number;
+  tr7?: number;
+  tr8?: number;
+  tr9?: number;
+  tr10?: number;
   tm?: number; // Temps Moyen
+  /** Si true, tm est saisi manuellement (prioritaire sur la moyenne des TR) */
+  tmManual?: boolean;
   majoration: number; // Taux de majoration (default 1.15)
   tempMajore?: number; // TM * Majoration
   pMax?: number; // Production Maximale
@@ -293,7 +319,20 @@ export type PlanningEvent = {
   estimatedEndDate?: string;
   producedQuantity?: number;
   modelName?: string;
+  // Section-aware scheduling
+  sectionSplitEnabled?: boolean;
+  fournisseurId?: string;
+  fournisseurDate?: string;  // L: matériaux arrivent
+  prepStart?: string;        // saisi par l'utilisateur
+  prepEnd?: string;          // calculé
+  montageStart?: string;     // calculé: max(prepEnd, fournisseurDate)
+  montageEnd?: string;       // calculé = dateExport
 };
+
+export interface SectionEffectif {
+  total: number;
+  roles?: Record<string, number>;
+}
 
 export interface Chaine {
   id: string;
@@ -325,6 +364,10 @@ export type SuiviData = {
   downtimes?: Record<string, string>; // NEW: Phase 13 - Reasons for missed targets
   defauts?: { id: string; hour: string; type: string; quantity: number; notes: string }[]; // NEW: Phase 13 - In-Line QC
   trs?: number; // NEW: Phase 13 - OEE/TRS score
+  // Section-aware tracking
+  activeSection?: 'PREPARATION' | 'MONTAGE' | 'BOTH';
+  sectionEffectif?: { preparation: SectionEffectif; montage: SectionEffectif };
+  sectionOutput?: { preparation: number; montage: number };
 };
 
 // --- TYPES FOR MAGASIN & ATELIER ---

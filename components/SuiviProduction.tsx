@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ModelData, SuiviData, AppSettings, PlanningEvent } from '../types';
+import { calculateSectionDates, getActiveSection } from '../utils/planning';
 import { Activity, Printer, PackageCheck, Plus, Trash2, CalendarDays, Box, Target, AlertTriangle, ShieldAlert, Timer, CheckCircle2, Factory, Filter, Settings2 } from 'lucide-react';
 
 interface SuiviProductionProps {
@@ -352,7 +353,23 @@ export default function SuiviProduction({ models, suivis = [], setSuivis, planni
                                                 <div className="flex items-center flex-wrap gap-4 lg:gap-8">
                                                     <div>
                                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Modèle</span>
-                                                        <span className="text-base font-black text-indigo-900 leading-none">{file.model.meta_data.nom_modele}</span>
+                                                        <span className="text-base font-black text-indigo-900 leading-none flex items-center gap-2">
+                                                            {file.model.meta_data.nom_modele}
+                                                            {(() => {
+                                                                if (!file.model.ficheData?.sectionSplitEnabled) return null;
+                                                                const ev = planningEvents.find(p => p.id === file.planningId);
+                                                                if (!ev) return null;
+                                                                const dates = calculateSectionDates(ev, file.model, settings);
+                                                                const today = new Date().toISOString().slice(0, 10);
+                                                                const sec = getActiveSection(today, dates);
+                                                                if (sec === 'NONE') return null;
+                                                                const cls = sec === 'PREPARATION' ? 'bg-blue-100 text-blue-700 border-blue-300'
+                                                                    : sec === 'MONTAGE' ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                                                                    : 'bg-amber-100 text-amber-700 border-amber-300';
+                                                                const label = sec === 'PREPARATION' ? 'Préparation' : sec === 'MONTAGE' ? 'Montage' : 'Prép + Montage';
+                                                                return <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${cls}`}>{label}</span>;
+                                                            })()}
+                                                        </span>
                                                     </div>
                                                     <div>
                                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Tps Base</span>

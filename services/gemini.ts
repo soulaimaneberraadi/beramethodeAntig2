@@ -94,3 +94,71 @@ export async function generateTextileOperations(articleDescription: string, avai
     throw new Error("Erreur IA : " + (error.message || "Service indisponible"));
   }
 }
+
+export async function suggestTextileVocabulary(
+  contextText: string,
+  existingVocabulary: string[] = [],
+  limit: number = 10
+): Promise<string[]> {
+  try {
+    if (!process.env.API_KEY) return [];
+
+    const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const safeLimit = Math.max(3, Math.min(20, Math.floor(limit)));
+    const existingSample = existingVocabulary
+      .filter(Boolean)
+      .slice(0, 120)
+      .join(", ");
+
+    const response = await client.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: `Tu es expert methode textile.
+Propose ${safeLimit} mots techniques utiles pour une gamme de confection textile.
+Contraines:
+- Reponse en FR, termes courts, pratiques atelier.
+- IMPORTANT: un seul mot par element (pas d'expression, pas de phrase, pas d'espace).
+- Eviter les doublons exacts.
+- Eviter les termes deja presents si possible.
+- Retourne UNIQUEMENT un JSON array de strings.
+
+Contexte saisie utilisateur:
+${contextText}
+
+Vocabulaire existant (a eviter):
+${existingSample || "Aucun"}`,
+      config: {
+        temperature: 0.25,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+      },
+    });
+
+    const text = response.text;
+    if (!text) return [];
+
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) return [];
+
+    const seen = new Set<string>();
+    const existingLower = new Set(existingVocabulary.map(v => (v || "").toLowerCase()));
+
+    return parsed
+      .map(v => (typeof v === "string" ? v.trim() : ""))
+      .filter(v => v.length >= 4)
+      .filter(v => !/\s/.test(v))
+      .filter(v => /^[A-Za-zÀ-ÿ0-9'-]+$/.test(v))
+      .filter(v => {
+        const key = v.toLowerCase();
+        if (seen.has(key) || existingLower.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, safeLimit);
+  } catch (error) {
+    console.error("Gemini Vocabulary Suggestion Error:", error);
+    return [];
+  }
+}

@@ -151,7 +151,15 @@ const getStatusColor = (saturation: number) => {
     };
 };
 
-const getPosteColor = (index: number) => POSTE_COLORS[index % POSTE_COLORS.length];
+const getDefaultPosteColorName = (index: number) => POSTE_COLORS[index % POSTE_COLORS.length].name;
+
+const getPosteColor = (poste: Poste, index: number) => {
+  if (poste.colorName) {
+    const existingColor = POSTE_COLORS.find(color => color.name === poste.colorName);
+    if (existingColor) return existingColor;
+  }
+  return POSTE_COLORS[index % POSTE_COLORS.length];
+};
 
 export default function Balancing({ 
   operations,
@@ -177,6 +185,22 @@ export default function Balancing({
   const [isHeaderSticky, setIsHeaderSticky] = useState(true); // Row Header Sticky
   const [showColors, setShowColors] = useState(true); // Column Colors
   const [showGroupColors, setShowGroupColors] = useState(true); // Row Colors (Groups)
+
+  // Section split summary (read-only insights when ops are tagged Préparation/Montage)
+  const sectionStats = React.useMemo(() => {
+      const acc = { PREPARATION: 0, MONTAGE: 0, GLOBAL: 0 };
+      operations.forEach(o => { acc[o.section || 'GLOBAL'] += (o.time || 0); });
+      const has = acc.PREPARATION > 0 || acc.MONTAGE > 0;
+      const targetPH = (sam: number) => sam > 0 ? Math.round((numWorkers * efficiency * 60) / sam) : 0;
+      return {
+          has,
+          prepSAM: acc.PREPARATION,
+          montageSAM: acc.MONTAGE,
+          globalSAM: acc.GLOBAL,
+          prepPH: targetPH(acc.PREPARATION),
+          montagePH: targetPH(acc.MONTAGE),
+      };
+  }, [operations, numWorkers, efficiency]);
 
   // --- INSERT MODAL STATE ---
   const [showInsertModal, setShowInsertModal] = useState(false);
@@ -248,12 +272,27 @@ export default function Balancing({
     }
   }, []);
 
+  useEffect(() => {
+    if (!postes.some((poste) => !poste.colorName)) return;
+    setPostes((prev) =>
+      prev.map((poste, index) => ({
+        ...poste,
+        colorName: poste.colorName || getDefaultPosteColorName(index),
+      }))
+    );
+  }, [postes, setPostes]);
+
   // --- INITIALIZATION / AUTO-BALANCE ---
   const runAutoBalancing = (force = false) => {
     if (isManual && !force) return;
 
     const newAssignments: Record<string, string[]> = {};
     const newPostes: Poste[] = [];
+    const existingColorByName = new Map(
+      postes
+        .filter((p) => !!p.colorName)
+        .map((p) => [p.name, p.colorName as string])
+    );
 
     // Allow 15% tolerance on cycle time
     const limitMax = bf > 0 ? bf * 1.15 : Number.MAX_VALUE;
@@ -267,10 +306,12 @@ export default function Balancing({
         if (currentPosteOps.length === 0) return;
         
         const posteId = `P${posteIdx}`;
+        const posteName = `P${posteIdx}`;
         newPostes.push({ 
             id: posteId, 
-            name: `P${posteIdx}`, 
-            machine: currentMachine || 'MAN'
+            name: posteName, 
+            machine: currentMachine || 'MAN',
+            colorName: existingColorByName.get(posteName) || getDefaultPosteColorName(posteIdx - 1)
         });
         
         currentPosteOps.forEach(op => {
@@ -372,7 +413,8 @@ export default function Balancing({
               const newPoste: Poste = {
                   ...currentPoste,
                   id: `P_${Date.now()}`,
-                  name: 'P?' 
+                  name: 'P?',
+                  colorName: currentPoste.colorName || getDefaultPosteColorName(idx + 1)
               };
               newPostes.splice(idx + 1, 0, newPoste);
               break;
@@ -411,7 +453,8 @@ export default function Balancing({
                   const pastedPoste = {
                       ...clipboard.poste,
                       id: newId,
-                      name: 'P?' 
+                      name: 'P?',
+                      colorName: clipboard.poste.colorName || getDefaultPosteColorName(idx + 1)
                   };
                   newPostes.splice(idx + 1, 0, pastedPoste);
                   
@@ -431,7 +474,11 @@ export default function Balancing({
           }
       }
 
-      newPostes = newPostes.map((p, i) => ({ ...p, name: `P${i + 1}` }));
+      newPostes = newPostes.map((p, i) => ({
+          ...p,
+          name: `P${i + 1}`,
+          colorName: p.colorName || getDefaultPosteColorName(i)
+      }));
       
       setPostes(newPostes);
       setAssignments(newAssignments);
@@ -449,12 +496,17 @@ export default function Balancing({
           name: 'P?',
           machine: insertData.machine,
           notes: insertData.notes,
-          operatorName: ''
+          operatorName: '',
+          colorName: getDefaultPosteColorName(insertIndex)
       };
 
       const newPostes = [...postes];
       newPostes.splice(insertIndex, 0, newPoste);
-      const reindexedPostes = newPostes.map((p, i) => ({ ...p, name: `P${i + 1}` }));
+      const reindexedPostes = newPostes.map((p, i) => ({
+          ...p,
+          name: `P${i + 1}`,
+          colorName: p.colorName || getDefaultPosteColorName(i)
+      }));
       
       setPostes(reindexedPostes);
 
@@ -565,7 +617,7 @@ export default function Balancing({
         
         let colorFill = '';
         if (showColors) {
-            colorFill = getPosteColor(index).fill;
+            colorFill = getPosteColor(p, index).fill;
         } else {
             const statusColor = getStatusColor(stat.saturation);
             colorFill = statusColor.fill;
@@ -714,6 +766,23 @@ export default function Balancing({
             </div>
        </div>
       
+      {sectionStats.has && (
+        <div className="flex flex-wrap items-center gap-3 px-3 py-2 mx-2 bg-gradient-to-r from-blue-50 to-emerald-50 rounded-xl border border-slate-200">
+          <span className="text-[10px] font-bold uppercase text-slate-500">Sections</span>
+          <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-lg">
+            <span className="text-[10px] font-bold uppercase">Préparation</span>
+            <span className="text-xs font-black">SAM {sectionStats.prepSAM.toFixed(2)} min</span>
+            <span className="text-xs font-black">P/H {sectionStats.prepPH}</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg">
+            <span className="text-[10px] font-bold uppercase">Montage</span>
+            <span className="text-xs font-black">SAM {sectionStats.montageSAM.toFixed(2)} min</span>
+            <span className="text-xs font-black">P/H {sectionStats.montagePH}</span>
+          </div>
+          <span className="text-[10px] text-slate-500 italic">Bilan informatif — équilibrage actuel sur opérations sélectionnées</span>
+        </div>
+      )}
+
       {/* 2. CONTROLS (VIEW SWITCHER + ACTIONS) */}
       <div className="flex flex-col sm:flex-row justify-between items-end gap-3 px-2">
          <div className="flex bg-slate-100/80 p-1 rounded-xl shadow-inner border border-slate-200">
@@ -770,7 +839,7 @@ export default function Balancing({
                                         </div>
                                     </th>
                                     {postes.map((p, i) => {
-                                        const color = showColors ? getPosteColor(i) : NEUTRAL_COLOR;
+                                        const color = showColors ? getPosteColor(p, i) : NEUTRAL_COLOR;
                                         const hasOverride = p.timeOverride !== undefined;
                                         return (
                                             <th 
@@ -827,7 +896,7 @@ export default function Balancing({
                                             </td>
                                             {postes.map((p, i) => {
                                                 const isAssigned = assignedPosts.includes(p.id);
-                                                const color = showColors ? getPosteColor(i) : NEUTRAL_COLOR;
+                                                const color = showColors ? getPosteColor(p, i) : NEUTRAL_COLOR;
                                                 return (
                                                     <td 
                                                         key={p.id} 
@@ -942,7 +1011,7 @@ export default function Balancing({
                   {postes.map((p, index) => {
                       const ops = operations.filter(op => (assignments[op.id] || []).includes(p.id));
                       const stat = posteStats[p.id] || { time: 0, saturation: 0, nTheo: 0 };
-                      const color = showColors ? getPosteColor(index) : NEUTRAL_COLOR;
+                      const color = showColors ? getPosteColor(p, index) : NEUTRAL_COLOR;
                       
                       return (
                         <div key={p.id} onContextMenu={(e) => handleContextMenu(e, p.id)} className={`bg-white rounded-xl border ${color.border} shadow-sm p-3 relative group hover:shadow-md transition-all`}>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ModelData, PlanningEvent, PlanningStatus, SuiviData, AppSettings } from '../types';
+import { calculateSectionDates } from '../utils/planning';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     AlertTriangle, Layers, Split, ArrowRightCircle,
@@ -104,6 +105,7 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
         quantity: 0,
         clientName: '',
         strictDeadline_DDS: '',
+        fournisseurDate: '' as string,
     });
 
     // Open edit modal
@@ -259,7 +261,8 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
         const chaine = chaines.find(c => c.id === newEv.chaineId);
         const sam    = model?.meta_data.total_temps || 15;
         const endIso = calculateEndDate(newEv.startDate, newEv.quantity, sam, chaine?.efficiency || 0.85, settings);
-        const ev: PlanningEvent = {
+        const splitEnabled = !!model?.ficheData?.sectionSplitEnabled;
+        const baseEv: PlanningEvent = {
             id: `event_${Date.now()}`,
             modelId: newEv.modelId,
             chaineId: newEv.chaineId,
@@ -271,10 +274,22 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
             modelName: model?.meta_data.nom_modele || 'Nouveau',
             clientName: newEv.clientName || model?.ficheData?.client || '',
             strictDeadline_DDS: newEv.strictDeadline_DDS || undefined,
+            sectionSplitEnabled: splitEnabled,
+            prepStart: splitEnabled ? newEv.startDate : undefined,
+            fournisseurDate: (newEv as any).fournisseurDate || undefined,
+        };
+        const dates = calculateSectionDates(baseEv, model, settings);
+        const ev: PlanningEvent = {
+            ...baseEv,
+            prepEnd: dates.prepEnd,
+            montageStart: dates.montageStart,
+            montageEnd: dates.montageEnd,
+            dateExport: dates.montageEnd || endIso,
+            estimatedEndDate: dates.montageEnd || endIso,
         };
         setPlanningEvents(prev => [ev, ...prev]);
         setAddModal(false);
-        setNewEv({ modelId: '', chaineId: 'CHAINE 1', startDate: new Date().toISOString().split('T')[0], quantity: 0, clientName: '', strictDeadline_DDS: '' });
+        setNewEv({ modelId: '', chaineId: 'CHAINE 1', startDate: new Date().toISOString().split('T')[0], quantity: 0, clientName: '', strictDeadline_DDS: '', fournisseurDate: '' });
     };
 
     // ── Stats ────────────────────────────────────────────────────────────────
@@ -507,6 +522,28 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
                                                         {risk && <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />}
                                                     </div>
                                                     {client && <div className="text-[10px] text-white/50 truncate">{client}</div>}
+                                                    {(() => {
+                                                        const m = models.find(mm => mm.id === ev.modelId);
+                                                        if (!m?.ficheData?.sectionSplitEnabled && !ev.sectionSplitEnabled) return null;
+                                                        const dates = calculateSectionDates(ev, m, settings);
+                                                        const start = new Date(ev.startDate || ev.dateLancement || dates.prepStart || '').getTime();
+                                                        const end = new Date(ev.estimatedEndDate || ev.dateExport || dates.montageEnd || '').getTime();
+                                                        const span = Math.max(1, end - start);
+                                                        const pct = (iso?: string) => iso ? Math.max(0, Math.min(100, ((new Date(iso).getTime() - start) / span) * 100)) : 0;
+                                                        const prepLeft = pct(dates.prepStart);
+                                                        const prepRight = pct(dates.prepEnd);
+                                                        const monLeft = pct(dates.montageStart);
+                                                        const monRight = pct(dates.montageEnd);
+                                                        const fournPct = dates.fournisseurDate ? pct(dates.fournisseurDate) : null;
+                                                        const conflict = dates.warnings.some(w => w.includes('fournisseur'));
+                                                        return (
+                                                            <div className="relative h-1.5 mt-1 bg-black/30 rounded-full">
+                                                                <div className="absolute h-full bg-blue-400/80 rounded-l" style={{ left: `${prepLeft}%`, width: `${Math.max(0, prepRight - prepLeft)}%` }} title="Préparation" />
+                                                                <div className={`absolute h-full ${conflict ? 'bg-red-400/80' : 'bg-emerald-400/80'} rounded-r`} style={{ left: `${monLeft}%`, width: `${Math.max(0, monRight - monLeft)}%` }} title="Montage" />
+                                                                {fournPct !== null && <div className="absolute -top-1 w-0.5 h-3.5 bg-amber-300" style={{ left: `${fournPct}%` }} title={`Fournisseur ${dates.fournisseurDate}`} />}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     <div className="mt-auto">
                                                         <div className="flex justify-between text-[10px] font-bold text-white/60 mb-1">
                                                             <span>{prod}/{qty} pcs</span>
@@ -886,6 +923,24 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
                                         />
                                     </div>
                                 </div>
+
+                                {/* Fournisseur date (L) — actif si Section split */}
+                                {(() => {
+                                    const m = models.find(mm => mm.id === newEv.modelId);
+                                    if (!m?.ficheData?.sectionSplitEnabled) return null;
+                                    return (
+                                        <div>
+                                            <label className="text-[10px] font-black text-amber-400 uppercase tracking-wider block mb-1.5">📦 Date fournisseur (L)</label>
+                                            <input
+                                                type="date"
+                                                className="w-full bg-gray-950 border border-amber-700/40 focus:border-amber-500 text-white rounded-xl px-4 py-2.5 outline-none text-sm transition-colors"
+                                                value={newEv.fournisseurDate}
+                                                onChange={e => setNewEv(p => ({ ...p, fournisseurDate: e.target.value }))}
+                                            />
+                                            <p className="text-[10px] text-gray-500 mt-1">Le Montage ne démarrera pas avant cette date.</p>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* Client */}
                                 <div>

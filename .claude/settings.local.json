@@ -6,7 +6,13 @@
       "Bash(grep -n \"\\\\.map\\(\" components/*.tsx)",
       "Bash(grep -n \"\\\\.map.*key=\" components/*.tsx)",
       "Bash(grep -n \"\\\\.map.*=>.*{$\" components/Implantation.tsx)",
-      "Bash(grep -n \"\\\\.map.*index.*=>.*key.*index\" components/*.tsx)"
+      "Bash(grep -n \"\\\\.map.*index.*=>.*key.*index\" components/*.tsx)",
+      "Bash(cmd /c \"del \\\\\"C:\\\\Users\\\\HP\\\\3D Objects\\\\BERAMETHODE\\\\.git\\\\index.lock\\\\\"\")",
+      "Bash(cmd /c \"cd \\\\\"C:\\\\Users\\\\HP\\\\3D Objects\\\\BERAMETHODE\\\\\" && git status 2>&1\")",
+      "Bash(powershell -Command \"Set-Location 'C:\\\\Users\\\\HP\\\\3D Objects\\\\BERAMETHODE'; git status\")",
+      "Bash(powershell -Command ':*)",
+      "Bash(powershell -Command \"Set-Location 'C:\\\\Users\\\\HP\\\\3D Objects\\\\BERAMETHODE'; git push -u origin master 2>&1\")",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

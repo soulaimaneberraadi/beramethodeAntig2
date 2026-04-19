@@ -38,7 +38,6 @@ import {
   CheckSquare,
   Layers,
   MousePointer2,
-  FileText,
   ArrowRight,
   CornerDownRight,
   MousePointerClick,
@@ -52,8 +51,8 @@ import {
   MousePointer,
   Minus
 } from 'lucide-react';
-import { Machine, Operation, ComplexityFactor, StandardTime, Guide } from '../types';
-import { analyzeTextileContext } from '../services/gemini';
+import { Machine, Operation, ComplexityFactor, StandardTime, Guide, Poste } from '../types';
+import { analyzeTextileContext, suggestTextileVocabulary } from '../services/gemini';
 import { VOCABULARY } from '../data/vocabulary';
 import ExcelInput from './ExcelInput';
 
@@ -73,6 +72,29 @@ const GROUP_COLORS = [
   { bg: 'bg-sky-50', border: 'border-sky-500', text: 'text-sky-700' },          // Cool
 ];
 
+const POSTE_COLORS = [
+  { name: 'indigo', bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-100', badgeText: 'text-indigo-800', fill: '#6366f1' },
+  { name: 'orange', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-100', badgeText: 'text-orange-800', fill: '#f97316' },
+  { name: 'emerald', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100', badgeText: 'text-emerald-800', fill: '#10b981' },
+  { name: 'rose', bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-100', badgeText: 'text-rose-800', fill: '#f43f5e' },
+  { name: 'cyan', bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', badge: 'bg-cyan-100', badgeText: 'text-cyan-800', fill: '#06b6d4' },
+  { name: 'amber', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-100', badgeText: 'text-amber-800', fill: '#f59e0b' },
+  { name: 'violet', bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-100', badgeText: 'text-violet-800', fill: '#8b5cf6' },
+  { name: 'lime', bg: 'bg-lime-50', border: 'border-lime-200', text: 'text-lime-700', badge: 'bg-lime-100', badgeText: 'text-lime-800', fill: '#84cc16' },
+  { name: 'fuchsia', bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-700', badge: 'bg-fuchsia-100', badgeText: 'text-fuchsia-800', fill: '#d946ef' },
+  { name: 'teal', bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', badge: 'bg-teal-100', badgeText: 'text-teal-800', fill: '#14b8a6' },
+  { name: 'red', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'bg-red-100', badgeText: 'text-red-800', fill: '#ef4444' },
+  { name: 'sky', bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', badge: 'bg-sky-100', badgeText: 'text-sky-800', fill: '#0ea5e9' },
+];
+
+const getPosteColor = (poste: Poste, index: number) => {
+  if (poste.colorName) {
+    const mapped = POSTE_COLORS.find((color) => color.name === poste.colorName);
+    if (mapped) return mapped;
+  }
+  return POSTE_COLORS[index % POSTE_COLORS.length];
+};
+
 const getGroupStyle = (groupId: string) => {
     if (!groupId) return null;
     let hash = 0;
@@ -83,34 +105,69 @@ const getGroupStyle = (groupId: string) => {
     return GROUP_COLORS[index];
 };
 
-// --- TEST DATA: BLOUSE ---
-const BLOUSE_OPS: Operation[] = [
-    { id: '1', order: 1, description: 'Surfilage parementures et enformes', machineName: 'Surjeteuse 3 Fils', time: 0.35, length: 120, machineId: '', manualTime: 0, side: 'D' },
-    { id: '2', order: 2, description: 'Thermocollage col, pieds et poignets', machineName: 'Presse', time: 0.45, length: 0, machineId: '', manualTime: 0 },
-    { id: '3', order: 3, description: 'Assemblage col (Piquage)', machineName: 'Piqueuse Plate', time: 0.50, length: 45, machineId: '', manualTime: 0 },
-    { id: '4', order: 4, description: 'Dégarnir et retourner col', machineName: 'MAN', time: 0.40, length: 0, machineId: '', manualTime: 0 },
-    { id: '5', order: 5, description: 'Surpiqûre col 1 aiguille', machineName: 'Piqueuse Plate', time: 0.55, length: 45, machineId: '', manualTime: 0 },
-    { id: '6', order: 6, description: 'Préparation poche (Ourlet)', machineName: 'Piqueuse Plate', time: 0.35, length: 15, machineId: '', manualTime: 0 },
-    { id: '7', order: 7, description: 'Plaquage poche sur devant', machineName: 'Piqueuse Plate', time: 0.70, length: 40, machineId: '', manualTime: 0, side: 'G' },
-    { id: '8', order: 8, description: 'Assemblage épaules', machineName: 'Surjeteuse 5 Fils', time: 0.45, length: 30, machineId: '', manualTime: 0, side: 'GD' },
-    { id: '9', order: 9, description: 'Pose col sur encolure', machineName: 'Piqueuse Plate', time: 0.85, length: 45, machineId: '', manualTime: 0 },
-    { id: '10', order: 10, description: 'Rabat de col (Coulissage)', machineName: 'Piqueuse Plate', time: 0.75, length: 45, machineId: '', manualTime: 0 },
-    { id: '11', order: 11, description: 'Fente indéchirable manches', machineName: 'Piqueuse Plate', time: 0.60, length: 25, machineId: '', manualTime: 0, side: 'GD' },
-    { id: '12', order: 12, description: 'Assemblage manches à plat', machineName: 'Surjeteuse 5 Fils', time: 0.75, length: 90, machineId: '', manualTime: 0, side: 'GD' },
-    { id: '13', order: 13, description: 'Fermeture côtés et manches', machineName: 'Surjeteuse 5 Fils', time: 0.95, length: 120, machineId: '', manualTime: 0, side: 'GD' },
-    { id: '14', order: 14, description: 'Préparation poignets', machineName: 'Piqueuse Plate', time: 0.60, length: 50, machineId: '', manualTime: 0, side: 'GD' },
-    { id: '15', order: 15, description: 'Pose poignets', machineName: 'Piqueuse Plate', time: 0.90, length: 50, machineId: '', manualTime: 0, side: 'GD' },
-    { id: '16', order: 16, description: 'Ourlet bas chemisier', machineName: 'Piqueuse Plate', time: 0.80, length: 100, machineId: '', manualTime: 0 },
-    { id: '17', order: 17, description: 'Boutonnières (Devant + Col + Poignets)', machineName: 'Boutonnière', time: 1.10, length: 9, machineId: '', manualTime: 0 },
-    { id: '18', order: 18, description: 'Pose boutons', machineName: 'Pose-bouton', time: 0.80, length: 9, machineId: '', manualTime: 0 },
-    { id: '19', order: 19, description: 'Contrôle final et épluchage', machineName: 'CONTROLE', time: 1.50, length: 0, machineId: '', manualTime: 0 },
-    { id: '20', order: 20, description: 'Repassage final et pliage', machineName: 'FER', time: 2.00, length: 0, machineId: '', manualTime: 0 },
-];
-
 interface FabricSettings {
   enabled: boolean;
   selected: 'easy' | 'medium' | 'hard';
   values: { easy: number; medium: number; hard: number };
+}
+
+const FABRIC_LEVEL_LABELS: Record<'easy' | 'medium' | 'hard', string> = {
+  easy: 'Facile',
+  medium: 'Moyen',
+  hard: 'Difficile'
+};
+
+const FABRIC_LEVEL_EXAMPLES: Record<'easy' | 'medium' | 'hard', string> = {
+  easy: 'Coton, Popeline, Jersey stable',
+  medium: 'Denim, Velours, Maille legere',
+  hard: 'Soie, Mousseline, Cuir, Satin'
+};
+
+const FABRIC_LEVEL_SUGGESTED_SECONDS: Record<'easy' | 'medium' | 'hard', number> = {
+  easy: 2,
+  medium: 4,
+  hard: 7
+};
+
+const clampFabricPenalty = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(120, Math.round(value)));
+};
+
+const AUTOCOMPLETE_LOCAL_STORAGE_KEY = 'gamme_word_counts';
+const GUIDE_MEMORY_STORAGE_KEY = 'gamme_guide_memory_v1';
+const WORD_LEARN_MIN_OCCURRENCES = 2;
+const REMOTE_SUGGESTIONS_COOLDOWN_MS = 12000;
+const MIN_VOCAB_WORD_LENGTH = 4;
+const TEXTILE_FALLBACK_TERMS = [
+  'surpiqure',
+  'ourlet',
+  'assemblage',
+  'piquage',
+  'surjet',
+  'thermocollage',
+  'repassage',
+  'controle',
+  'qualite',
+  'parementure',
+  'entoilage',
+  'bouton',
+  'boutonniere',
+];
+
+interface GuideMemoryEntry {
+  id: string;
+  machineNorm: string;
+  guideId: string;
+  guideName: string;
+  tokens: string[];
+  successCount: number;
+  updatedAt: number;
+}
+
+interface RankedGuide {
+  guide: Guide;
+  score: number;
 }
 
 interface GammeProps {
@@ -129,6 +186,7 @@ interface GammeProps {
   complexityFactors: ComplexityFactor[];
   standardTimes: StandardTime[];
   guides?: Guide[];
+  setGuides?: React.Dispatch<React.SetStateAction<Guide[]>>;
   // Autocomplete Props
   isAutocompleteEnabled: boolean;
   userVocabulary: string[];
@@ -136,6 +194,9 @@ interface GammeProps {
   // Fabric Settings (Lifted Up)
   fabricSettings: FabricSettings;
   setFabricSettings: React.Dispatch<React.SetStateAction<FabricSettings>>;
+  sectionSplitEnabled?: boolean;
+  assignments?: Record<string, string[]>;
+  postes?: Poste[];
 }
 
 export default function Gamme({ 
@@ -154,12 +215,20 @@ export default function Gamme({
   complexityFactors,
   standardTimes,
   guides = [],
+  setGuides,
   isAutocompleteEnabled,
   userVocabulary,
   setUserVocabulary,
   fabricSettings,
-  setFabricSettings
+  setFabricSettings,
+  sectionSplitEnabled = false,
+  assignments = {},
+  postes = []
 }: GammeProps) {
+  const posteColorById = useMemo(
+    () => new Map(postes.map((poste, index) => [poste.id, getPosteColor(poste, index)])),
+    [postes]
+  );
 
   const [showLength, setShowLength] = useState(true);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -173,8 +242,19 @@ export default function Gamme({
 
   // UI States
   const [showFabricModal, setShowFabricModal] = useState(false);
+  const [fabricDraft, setFabricDraft] = useState<FabricSettings | null>(null);
+  const [fabricPenaltyInput, setFabricPenaltyInput] = useState<string>('0');
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : false);
+  const [remoteVocabulary, setRemoteVocabulary] = useState<string[]>([]);
   const [showGuideModal, setShowGuideModal] = useState<{ opId: string, machineName: string } | null>(null);
+  const [showGuideCreateForm, setShowGuideCreateForm] = useState(false);
+  const [quickGuideDraft, setQuickGuideDraft] = useState<Partial<Guide>>({ name: '', category: 'Guides & Jauges', machineType: '', description: '', useCase: '' });
+  const [guideCreateErrors, setGuideCreateErrors] = useState<{ name: boolean; machineType: boolean }>({ name: false, machineType: false });
+  const [missingMachineOpIds, setMissingMachineOpIds] = useState<string[]>([]);
+  const [guideFeedback, setGuideFeedback] = useState<{ tone: 'warning' | 'info'; message: string } | null>(null);
   const [guideSearch, setGuideSearch] = useState('');
+  const [guideMemory, setGuideMemory] = useState<GuideMemoryEntry[]>([]);
+  const [guideHighlightIndex, setGuideHighlightIndex] = useState<number>(0);
 
   // Flow/Link State
   const [isLinkingMode, setIsLinkingMode] = useState(false);
@@ -193,9 +273,6 @@ export default function Gamme({
 
   const [clipboard, setClipboard] = useState<{ op: Operation | null; mode: 'copy' | 'cut' } | null>(null);
 
-  // Combine Vocabularies (Memoized)
-  const fullVocabulary = useMemo(() => [...VOCABULARY, ...userVocabulary], [userVocabulary]);
-
   // AI Assistant State
   const [showAiModal, setShowAiModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -203,10 +280,65 @@ export default function Gamme({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const wordUsageRef = useRef<Record<string, number>>({});
+  const remoteSuggestionCacheRef = useRef<Record<string, string[]>>({});
+  const lastRemoteFetchRef = useRef<number>(0);
+
+  const isValidVocabularyWord = (word: string) => {
+    const clean = (word || '').trim();
+    return clean.length >= MIN_VOCAB_WORD_LENGTH && !/\s/.test(clean) && /^[A-Za-zÀ-ÿ0-9'-]+$/.test(clean);
+  };
+
+  const mergeUniqueWords = (words: string[]) => {
+    const seen = new Set<string>();
+    return words.filter(word => {
+      const clean = (word || '').trim();
+      const normalized = clean.toLowerCase();
+      if (!isValidVocabularyWord(clean) || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+  };
+
+  const normalizeWord = (word: string) =>
+    (word || '')
+      .trim()
+      .replace(/[.,;:!?()[\]{}"']/g, '')
+      .replace(/\s+/g, ' ');
+
+  // Combine base, learned and remote textile suggestions
+  const fullVocabulary = useMemo(
+    () => mergeUniqueWords([...VOCABULARY, ...userVocabulary, ...remoteVocabulary]),
+    [userVocabulary, remoteVocabulary]
+  );
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, aiResponse]);
+
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOCOMPLETE_LOCAL_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, number>;
+      if (parsed && typeof parsed === 'object') {
+        wordUsageRef.current = parsed;
+      }
+    } catch {
+      // Ignore malformed local cache.
+    }
+  }, []);
 
   // Handle Linking Notification Timer (7 seconds)
   useEffect(() => {
@@ -243,6 +375,73 @@ export default function Gamme({
         window.removeEventListener('keydown', handleEsc);
     };
   }, []);
+
+  useEffect(() => {
+    const handleEscModal = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showFabricModal) handleFabricModalClose();
+      if (showGuideModal) setShowGuideModal(null);
+    };
+    window.addEventListener('keydown', handleEscModal);
+    return () => window.removeEventListener('keydown', handleEscModal);
+  }, [showFabricModal, showGuideModal]);
+
+  useEffect(() => {
+    if (!showFabricModal) return;
+    const activeSettings = fabricDraft || fabricSettings;
+    setFabricPenaltyInput(String(activeSettings.values[activeSettings.selected] ?? 0));
+  }, [showFabricModal, fabricDraft, fabricSettings]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(GUIDE_MEMORY_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as GuideMemoryEntry[];
+      if (Array.isArray(parsed)) {
+        setGuideMemory(parsed.filter(entry => entry?.guideId && entry?.machineNorm));
+      }
+    } catch {
+      // Ignore malformed storage.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GUIDE_MEMORY_STORAGE_KEY, JSON.stringify(guideMemory.slice(-250)));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [guideMemory]);
+
+  useEffect(() => {
+    if (!showGuideModal) return;
+    setShowGuideCreateForm(false);
+    setGuideHighlightIndex(0);
+    setGuideCreateErrors({ name: false, machineType: false });
+    setQuickGuideDraft({
+      name: '',
+      category: 'Guides & Jauges',
+      machineType: showGuideModal.machineName || '',
+      description: '',
+      useCase: '',
+    });
+  }, [showGuideModal]);
+
+  useEffect(() => {
+    setGuideHighlightIndex(0);
+  }, [guideSearch]);
+
+  useEffect(() => {
+    if (missingMachineOpIds.length === 0) return;
+    const timer = setTimeout(() => setMissingMachineOpIds([]), 3500);
+    return () => clearTimeout(timer);
+  }, [missingMachineOpIds]);
+
+  useEffect(() => {
+    if (!guideFeedback) return;
+    const timer = setTimeout(() => setGuideFeedback(null), 3200);
+    return () => clearTimeout(timer);
+  }, [guideFeedback]);
 
   // --- NUMBERING LOGIC FOR GROUPS ---
   const getDisplayIndex = (op: Operation, index: number) => {
@@ -290,6 +489,63 @@ export default function Gamme({
 
   // --- HELPER: NORMALIZE TEXT (SAFE) ---
   const normalize = (str: string) => (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const GUIDE_STOPWORDS = new Set(['de', 'des', 'du', 'la', 'le', 'les', 'et', 'sur', 'avec', 'pour', 'dans', 'par', 'the']);
+
+  const extractGuideTokens = (description: string) => {
+      const words: string[] = normalize(description).match(/[a-z0-9]+/g) || [];
+      return Array.from(
+        new Set(
+          words
+            .filter(word => word.length >= 3 && !GUIDE_STOPWORDS.has(word))
+            .slice(0, 12)
+        )
+      );
+  };
+
+  const getTokenOverlap = (sourceTokens: string[], targetTokens: string[]) => {
+      if (sourceTokens.length === 0 || targetTokens.length === 0) return 0;
+      const sourceSet = new Set(sourceTokens);
+      let overlap = 0;
+      targetTokens.forEach(token => {
+          if (sourceSet.has(token)) overlap += 1;
+      });
+      return overlap / Math.max(sourceTokens.length, targetTokens.length);
+  };
+
+  const getGuideUsageScore = (guideId: string, machineName: string) => {
+      if (!guideId) return 0;
+      const machineNorm = normalize(machineName);
+      return guideMemory
+        .filter(entry =>
+          entry.guideId === guideId &&
+          (!!machineNorm ? (machineNorm.includes(entry.machineNorm) || entry.machineNorm.includes(machineNorm)) : true)
+        )
+        .reduce((sum, entry) => sum + entry.successCount, 0);
+  };
+
+  const inferGuideBySimilarity = (description: string, machineName: string): { guide: Guide; confidence: number } | null => {
+      const descTokens = extractGuideTokens(description);
+      const machineNorm = normalize(machineName);
+      if (!descTokens.length) return null;
+
+      const ranked: RankedGuide[] = guides
+        .filter(guide => {
+          const gm = normalize(guide.machineType || '');
+          if (!machineNorm) return true;
+          if (!gm) return true;
+          return gm.includes(machineNorm) || machineNorm.includes(gm) || gm.includes('piqueuse');
+        })
+        .map(guide => {
+          const metaTokens = extractGuideTokens(`${guide.name || ''} ${(guide.category || '')} ${(guide.description || '')} ${(guide.useCase || '')}`);
+          const overlap = getTokenOverlap(descTokens, metaTokens);
+          const usageBoost = Math.min(0.2, getGuideUsageScore(guide.id, machineName) * 0.03);
+          return { guide, score: overlap + usageBoost };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      if (!ranked[0] || ranked[0].score < 0.35) return null;
+      return { guide: ranked[0].guide, confidence: Math.min(0.95, ranked[0].score) };
+  };
 
   // --- HELPER: FIND GUIDE BASED ON TEXT (SMART MATCHING WITH DARIJA) ---
   const findBestGuide = (description: string, machineName: string): Guide | undefined => {
@@ -389,28 +645,139 @@ export default function Gamme({
       return maxScore >= 10 ? bestCandidate : undefined;
   };
 
+  const resolveMachineName = (op: Operation) => {
+      if (op.machineName && op.machineName.trim().length > 0) return op.machineName.trim();
+      if (!op.machineId) return '';
+      const machine = machines.find(m => m.id === op.machineId);
+      return (machine?.name || '').trim();
+  };
+
+  const inferGuideFromMemory = (description: string, machineName: string): { guide: Guide; confidence: number } | null => {
+      const machineNorm = normalize(machineName);
+      const tokens = extractGuideTokens(description);
+      if (!machineNorm || tokens.length === 0 || guideMemory.length === 0) return null;
+
+      const candidates = guideMemory
+        .filter(entry => entry.machineNorm && (machineNorm.includes(entry.machineNorm) || entry.machineNorm.includes(machineNorm)))
+        .map(entry => {
+          const overlap = getTokenOverlap(tokens, entry.tokens);
+          const stability = Math.min(0.2, entry.successCount * 0.03);
+          return { entry, score: overlap + stability };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      const best = candidates[0];
+      if (!best || best.score < 0.34) return null;
+
+      const guide = guides.find(g => g.id === best.entry.guideId);
+      if (!guide) return null;
+      return { guide, confidence: Math.min(0.99, best.score) };
+  };
+
+  const learnGuidePreference = (description: string, machineName: string, guide: Guide) => {
+      const machineNorm = normalize(machineName);
+      const tokens = extractGuideTokens(description);
+      if (!machineNorm || tokens.length === 0 || !guide?.id) return;
+
+      setGuideMemory(prev => {
+          const now = Date.now();
+          const idx = prev.findIndex(entry =>
+              entry.guideId === guide.id &&
+              entry.machineNorm === machineNorm &&
+              getTokenOverlap(entry.tokens, tokens) >= 0.5
+          );
+
+          if (idx >= 0) {
+              return prev.map((entry, index) =>
+                  index === idx
+                    ? {
+                        ...entry,
+                        tokens: Array.from(new Set([...entry.tokens, ...tokens])).slice(0, 14),
+                        successCount: entry.successCount + 1,
+                        updatedAt: now,
+                      }
+                    : entry
+              );
+          }
+
+          return [
+              ...prev,
+              {
+                  id: `${guide.id}-${now}`,
+                  machineNorm,
+                  guideId: guide.id,
+                  guideName: guide.name,
+                  tokens,
+                  successCount: 1,
+                  updatedAt: now,
+              },
+          ];
+      });
+  };
+
+  const warnGuideRequirements = (opIds: string[], message: string) => {
+      if (opIds.length > 0) setMissingMachineOpIds(opIds);
+      setGuideFeedback({ tone: 'warning', message });
+  };
+
   // --- AUTO ASSIGN GUIDES (BATCH) ---
   const handleAutoAssignGuides = () => {
-      setOperations(prev => prev.map(op => {
-          // Skip if no description or machine
-          if (!op.description || !op.machineName) return op;
-          
-          const suggested = findBestGuide(op.description, op.machineName);
-          
+      if (guides.length === 0) {
+          setGuideFeedback({ tone: 'warning', message: "Aucun guide disponible. Ajoutez des guides d'abord dans Parametres > Guides & Accessoires." });
+          return;
+      }
+
+      const missingMachineIds = operations
+          .filter(op => !resolveMachineName(op))
+          .map(op => op.id);
+
+      if (missingMachineIds.length > 0) {
+          warnGuideRequirements(
+            missingMachineIds,
+            `Machine manquante sur ${missingMachineIds.length} operation(s). Completez la colonne Machine (en rouge), puis relancez Auto-Guides.`
+          );
+          return;
+      }
+
+      let assignedCount = 0;
+      let clearedCount = 0;
+      let learnedAssignedCount = 0;
+      const updatedOperations = operations.map(op => {
+          const machineName = resolveMachineName(op);
+          if (!op.description || !machineName) return op;
+
+          const learnedSuggestion = inferGuideFromMemory(op.description, machineName);
+          const ruleSuggestion = findBestGuide(op.description, machineName);
+          const similaritySuggestion = inferGuideBySimilarity(op.description, machineName);
+          const suggested = learnedSuggestion?.guide || ruleSuggestion || similaritySuggestion?.guide;
           if (suggested) {
-              return { 
-                  ...op, 
-                  guideId: suggested.id, 
-                  guideName: suggested.name 
-              };
-          } else {
+              assignedCount += 1;
+              if (learnedSuggestion?.guide.id === suggested.id) {
+                learnedAssignedCount += 1;
+              }
               return {
                   ...op,
-                  guideId: undefined,
-                  guideName: ''
+                  guideId: suggested.id,
+                  guideName: suggested.name
               };
           }
-      }));
+
+          if (op.guideId || op.guideName) {
+              clearedCount += 1;
+          }
+          return {
+              ...op,
+              guideId: undefined,
+              guideName: ''
+          };
+      });
+
+      setOperations(updatedOperations);
+      setMissingMachineOpIds([]);
+      setGuideFeedback({
+        tone: 'info',
+        message: `Auto-Guides termine: ${assignedCount} assignee(s), ${clearedCount} sans correspondance, dont ${learnedAssignedCount} via apprentissage.`
+      });
   };
 
   // --- FILTER GUIDES FOR MODAL ---
@@ -419,15 +786,55 @@ export default function Gamme({
       const searchLower = guideSearch.toLowerCase();
       const targetMachine = (showGuideModal.machineName || '').toLowerCase();
       
-      return guides.filter(g => {
-          const matchSearch = (g.name || '').toLowerCase().includes(searchLower) || (g.category || '').toLowerCase().includes(searchLower);
-          
-          const gMachine = (g.machineType || '').toLowerCase();
-          const matchMachine = targetMachine ? (gMachine.includes(targetMachine) || targetMachine.includes(gMachine) || gMachine.includes('piqueuse')) : true;
-          
-          return matchSearch && matchMachine;
-      });
-  }, [guides, guideSearch, showGuideModal]);
+      return guides
+        .filter(g => {
+            const matchSearch =
+              (g.name || '').toLowerCase().includes(searchLower) ||
+              (g.category || '').toLowerCase().includes(searchLower) ||
+              (g.description || '').toLowerCase().includes(searchLower) ||
+              (g.useCase || '').toLowerCase().includes(searchLower);
+
+            const gMachine = (g.machineType || '').toLowerCase();
+            const matchMachine = targetMachine
+              ? (gMachine.includes(targetMachine) || targetMachine.includes(gMachine) || gMachine.includes('piqueuse'))
+              : true;
+            
+            return matchSearch && matchMachine;
+        })
+        .map(guide => {
+            const gMachine = (guide.machineType || '').toLowerCase();
+            const machineScore = targetMachine && gMachine
+              ? (gMachine === targetMachine ? 3 : (gMachine.includes(targetMachine) || targetMachine.includes(gMachine) ? 2 : 1))
+              : 1;
+            const usageScore = getGuideUsageScore(guide.id, showGuideModal.machineName || '');
+            const textBoost = searchLower && (guide.name || '').toLowerCase().startsWith(searchLower) ? 1 : 0;
+            return { guide, score: machineScore + usageScore * 0.4 + textBoost };
+        })
+        .sort((a, b) => b.score - a.score)
+        .map(item => item.guide);
+  }, [guides, guideSearch, showGuideModal, guideMemory]);
+
+  const guideModalSuggestion = useMemo(() => {
+      if (!showGuideModal) return null;
+      const targetOp = operations.find(op => op.id === showGuideModal.opId);
+      if (!targetOp?.description) return null;
+      return (
+        inferGuideFromMemory(targetOp.description, showGuideModal.machineName || '') ||
+        inferGuideBySimilarity(targetOp.description, showGuideModal.machineName || '')
+      );
+  }, [showGuideModal, operations, guideMemory, guides]);
+
+  const recentGuidesForMachine = useMemo(() => {
+      if (!showGuideModal) return [];
+      const machineNorm = normalize(showGuideModal.machineName || '');
+      const ranked = guideMemory
+        .filter(entry => machineNorm ? (entry.machineNorm.includes(machineNorm) || machineNorm.includes(entry.machineNorm)) : true)
+        .sort((a, b) => b.successCount - a.successCount)
+        .slice(0, 4)
+        .map(entry => guides.find(g => g.id === entry.guideId))
+        .filter(Boolean) as Guide[];
+      return Array.from(new Map(ranked.map(g => [g.id, g])).values());
+  }, [showGuideModal, guideMemory, guides]);
 
   // --- HELPER: GET STANDARD CYCLE TIME ---
   const getStandardCycleTime = (machineName: string) => {
@@ -533,16 +940,6 @@ export default function Gamme({
   };
 
   // --- ACTIONS ---
-  const loadDemoData = () => {
-      // Re-calculate times for demo data based on current machines config
-      const computedOps = BLOUSE_OPS.map(op => {
-          const { T_Total } = calculateOpTimes(op, '', machines);
-          return { ...op, time: T_Total };
-      });
-      setOperations(computedOps);
-      setArticleName("Chemisier Femme - Modèle Test");
-  };
-
   const addOperation = () => {
     const newOp: Operation = {
       id: Date.now().toString(),
@@ -589,6 +986,25 @@ export default function Gamme({
           return { ...op, side: map[op.side || 'undefined'] };
       }));
   };
+
+  const toggleSection = (id: string) => {
+      setOperations(prev => prev.map(op => {
+          if (op.id !== id) return op;
+          const map: Record<string, 'PREPARATION' | 'MONTAGE' | 'GLOBAL'> = {
+              'GLOBAL': 'PREPARATION',
+              'PREPARATION': 'MONTAGE',
+              'MONTAGE': 'GLOBAL',
+          };
+          const cur = op.section || 'GLOBAL';
+          return { ...op, section: map[cur] };
+      }));
+  };
+
+  const sectionTotals = useMemo(() => {
+      const t = { PREPARATION: 0, MONTAGE: 0, GLOBAL: 0 };
+      operations.forEach(o => { t[o.section || 'GLOBAL'] += (o.time || 0); });
+      return t;
+  }, [operations]);
 
   const handleSelectAll = () => {
       if (selectedOpIds.length === operations.length && operations.length > 0) {
@@ -935,33 +1351,114 @@ export default function Gamme({
   };
 
   // --- SELF LEARNING LOGIC ---
-  const handleDescriptionBlur = (description: string) => {
+  const handleDescriptionBlur = async (description: string) => {
       if (!description) return;
 
-      const words = description.split(/\s+/);
-      const newWords: string[] = [];
+      const words = description.match(/[A-Za-zÀ-ÿ0-9'-]+/g) || [];
+      const shouldLearn: string[] = [];
+      const currentCounts = { ...wordUsageRef.current };
+      const existingSet = new Set(fullVocabulary.map(v => (v || '').toLowerCase()));
 
-      words.forEach(w => {
-          const cleanWord = w.trim();
-          if (cleanWord.length > 2 && isNaN(Number(cleanWord))) {
-              const exists = fullVocabulary.some(v => (v || '').toLowerCase() === cleanWord.toLowerCase());
-              if (!exists) {
-                  newWords.push(cleanWord);
-              }
+      words.forEach(rawWord => {
+          const cleanWord = normalizeWord(rawWord);
+          if (!isValidVocabularyWord(cleanWord) || !isNaN(Number(cleanWord))) return;
+
+          const key = cleanWord.toLowerCase();
+          const nextCount = (currentCounts[key] || 0) + 1;
+          currentCounts[key] = nextCount;
+
+          if (nextCount >= WORD_LEARN_MIN_OCCURRENCES && !existingSet.has(key)) {
+              shouldLearn.push(cleanWord);
+              existingSet.add(key);
           }
       });
 
-      if (newWords.length > 0) {
-          setUserVocabulary(prev => [...prev, ...newWords]);
+      wordUsageRef.current = currentCounts;
+      try {
+          localStorage.setItem(AUTOCOMPLETE_LOCAL_STORAGE_KEY, JSON.stringify(currentCounts));
+      } catch {
+          // Ignore storage errors (private mode, quota, etc).
       }
+
+      if (shouldLearn.length > 0) {
+          setUserVocabulary(prev => mergeUniqueWords([...prev, ...shouldLearn]));
+      }
+
+      // Online smart suggestion: enrich autocomplete with related textile words.
+      if (!isAutocompleteEnabled || !isOnline) return;
+      const now = Date.now();
+      if (now - lastRemoteFetchRef.current < REMOTE_SUGGESTIONS_COOLDOWN_MS) return;
+
+      const cacheKey = description.trim().toLowerCase().slice(0, 80);
+      const cached = remoteSuggestionCacheRef.current[cacheKey];
+      if (cached?.length) {
+          setRemoteVocabulary(prev => mergeUniqueWords([...prev, ...cached]));
+          return;
+      }
+
+      lastRemoteFetchRef.current = now;
+      const contextText = operations
+          .map(op => op.description)
+          .filter(Boolean)
+          .slice(0, 8)
+          .join(', ');
+
+      const aiSuggestions = await suggestTextileVocabulary(
+          `${contextText} | dernier input: ${description}`,
+          fullVocabulary,
+          10
+      );
+
+      const fallbackMatches = TEXTILE_FALLBACK_TERMS.filter(term => {
+          const key = term.toLowerCase();
+          return !existingSet.has(key) && !aiSuggestions.some(s => s.toLowerCase() === key);
+      }).slice(0, 4);
+
+      const merged = mergeUniqueWords([...aiSuggestions, ...fallbackMatches]);
+      if (merged.length === 0) return;
+
+      remoteSuggestionCacheRef.current[cacheKey] = merged;
+      setRemoteVocabulary(prev => mergeUniqueWords([...prev, ...merged]));
   };
 
   const assignGuide = (opId: string, guide: Guide) => {
+      const targetOp = operations.find(op => op.id === opId);
+      if (targetOp) {
+          const machineName = resolveMachineName(targetOp);
+          if (targetOp.description && machineName) {
+              learnGuidePreference(targetOp.description, machineName, guide);
+          }
+      }
+
       setOperations(prev => prev.map(op => {
           if (op.id !== opId) return op;
           return { ...op, guideId: guide.id, guideName: guide.name };
       }));
       setShowGuideModal(null);
+      setGuideFeedback({ tone: 'info', message: `Guide "${guide.name}" applique et memorise pour les prochaines suggestions.` });
+  };
+
+  const handleCreateGuideFromModal = () => {
+      if (!showGuideModal || !setGuides) return;
+
+      const nextErrors = {
+        name: !(quickGuideDraft.name || '').trim(),
+        machineType: !(quickGuideDraft.machineType || '').trim(),
+      };
+      setGuideCreateErrors(nextErrors);
+      if (nextErrors.name || nextErrors.machineType) return;
+
+      const newGuide: Guide = {
+        id: Date.now().toString(),
+        name: (quickGuideDraft.name || '').trim(),
+        category: (quickGuideDraft.category || 'Guides & Jauges').trim(),
+        machineType: (quickGuideDraft.machineType || '').trim(),
+        description: (quickGuideDraft.description || '').trim(),
+        useCase: (quickGuideDraft.useCase || '').trim(),
+      };
+
+      setGuides(prev => [...prev, newGuide]);
+      assignGuide(showGuideModal.opId, newGuide);
   };
 
   const updateGuideName = (opId: string, name: string) => {
@@ -995,7 +1492,10 @@ export default function Gamme({
       };
 
       if (!updatedOp.guideName || updatedOp.guideName === '') {
-          const suggested = findBestGuide(updatedOp.description, value);
+          const learnedSuggestion = inferGuideFromMemory(updatedOp.description, value);
+          const ruleSuggestion = findBestGuide(updatedOp.description, value);
+          const similaritySuggestion = inferGuideBySimilarity(updatedOp.description, value);
+          const suggested = learnedSuggestion?.guide || ruleSuggestion || similaritySuggestion?.guide;
           if (suggested) {
               updatedOp.guideId = suggested.id;
               updatedOp.guideName = suggested.name;
@@ -1022,14 +1522,71 @@ export default function Gamme({
   };
 
   const updateFabricValue = (key: 'easy' | 'medium' | 'hard', val: number) => {
+      const safeVal = clampFabricPenalty(val);
+      if (showFabricModal) {
+          setFabricDraft(prev => {
+              if (!prev) return prev;
+              return {
+                  ...prev,
+                  values: { ...prev.values, [key]: safeVal }
+              };
+          });
+          const selectedKey = (fabricDraft || fabricSettings).selected;
+          if (key === selectedKey) {
+              setFabricPenaltyInput(String(safeVal));
+          }
+          return;
+      }
       setFabricSettings(prev => ({
           ...prev,
-          values: { ...prev.values, [key]: val }
+          values: { ...prev.values, [key]: safeVal }
       }));
   };
 
   const selectFabricLevel = (level: 'easy' | 'medium' | 'hard') => {
+      if (showFabricModal) {
+          setFabricDraft(prev => {
+              if (!prev) return prev;
+              return { ...prev, selected: level };
+          });
+          setFabricPenaltyInput(String((fabricDraft || fabricSettings).values[level] ?? 0));
+          return;
+      }
       setFabricSettings(prev => ({ ...prev, selected: level }));
+  };
+
+  const handleFabricPenaltyInputChange = (raw: string) => {
+    setFabricPenaltyInput(raw);
+    if (raw === '') return;
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed)) return;
+    updateFabricValue(fabricSettings.selected, parsed);
+  };
+
+  const handleFabricPenaltyInputBlur = () => {
+    const parsed = Number(fabricPenaltyInput);
+    const safeVal = clampFabricPenalty(Number.isNaN(parsed) ? 0 : parsed);
+    setFabricPenaltyInput(String(safeVal));
+    updateFabricValue((fabricDraft || fabricSettings).selected, safeVal);
+  };
+
+  const openFabricModal = () => {
+    const initialDraft: FabricSettings = {
+      enabled: fabricSettings.enabled,
+      selected: fabricSettings.selected,
+      values: { ...fabricSettings.values }
+    };
+    setFabricDraft(initialDraft);
+    setFabricPenaltyInput(String(initialDraft.values[initialDraft.selected] ?? 0));
+    setShowFabricModal(true);
+  };
+
+  const handleFabricModalClose = (applyChanges = false) => {
+    if (applyChanges && fabricDraft) {
+      setFabricSettings(fabricDraft);
+    }
+    setShowFabricModal(false);
+    setFabricDraft(null);
   };
 
   const handleAiAssist = async () => {
@@ -1051,6 +1608,12 @@ export default function Gamme({
   };
   
   const handleDragStart = (e: React.DragEvent<HTMLTableRowElement>, index: number) => {
+    const target = e.target as HTMLElement | null;
+    // Prevent row drag when user interacts with editable/interactive controls.
+    if (target?.closest('input, textarea, select, button, [contenteditable="true"], a')) {
+      e.preventDefault();
+      return;
+    }
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = "move";
   };
@@ -1061,7 +1624,10 @@ export default function Gamme({
 
   const handleDrop = (e: React.DragEvent<HTMLTableRowElement>, dropIndex: number) => {
     e.preventDefault();
-    if (draggedIndex === null || draggedIndex === dropIndex) return;
+    if (draggedIndex === null || draggedIndex === dropIndex) {
+      setDraggedIndex(null);
+      return;
+    }
     
     const newOps = [...operations];
     const itemToMove = newOps[draggedIndex];
@@ -1101,9 +1667,42 @@ export default function Gamme({
     setDraggedIndex(null);
   };
 
+  const handleDragEnd = () => {
+    // Safety reset to avoid stuck faded row if drop does not fire.
+    setDraggedIndex(null);
+  };
+
   // --- CALCULATIONS FOR HEADER ---
   const totalMin = operations.reduce((sum, op) => sum + (op.time || 0), 0);
   const tempsArticle = totalMin * 1.20; 
+  const pH100 = Math.round((tempsArticle > 0 && presenceTime > 0) ? ((presenceTime * numWorkers) / tempsArticle) / (presenceTime / 60) : 0);
+  const pHDerivedNoPresence = Math.round(tempsArticle > 0 ? (numWorkers * 60) / tempsArticle : 0);
+  const pHReal = Math.round(pH100 * (efficiency / 100));
+
+  useEffect(() => {
+    const opTimes = operations.map(op => Number(op.time) || 0);
+    const opCount = operations.length;
+    const positiveOpTimes = opTimes.filter(v => v > 0);
+    const minOpTime = positiveOpTimes.length ? Math.min(...positiveOpTimes) : 0;
+    const maxOpTime = positiveOpTimes.length ? Math.max(...positiveOpTimes) : 0;
+    const avgOpTime = positiveOpTimes.length ? positiveOpTimes.reduce((a, b) => a + b, 0) / positiveOpTimes.length : 0;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H1',location:'components/Gamme.tsx:header-metrics',message:'Header card source values snapshot',data:{numWorkers,presenceTime,totalMin,tempsArticle,efficiency,bf},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    // #region agent log
+    fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H2',location:'components/Gamme.tsx:header-metrics',message:'P/H formula comparison with and without presenceTime',data:{pH100,pHDerivedNoPresence,presenceTime},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    // #region agent log
+    fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H3',location:'components/Gamme.tsx:header-metrics',message:'Operation time distribution snapshot',data:{opCount,positiveCount:positiveOpTimes.length,minOpTime,maxOpTime,avgOpTime},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    // #region agent log
+    fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H4',location:'components/Gamme.tsx:header-metrics',message:'Efficiency impact check',data:{efficiency,pH100,pHReal},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [operations, totalMin, tempsArticle, numWorkers, presenceTime, efficiency, bf, pH100, pHDerivedNoPresence, pHReal]);
 
   // Prepare suggestions for Machine Input (combining name and classe)
   const machineSuggestions = useMemo(() => {
@@ -1129,7 +1728,13 @@ export default function Gamme({
                         type="number" 
                         min="1" 
                         value={Math.round(numWorkers)} 
-                        onChange={(e) => setNumWorkers(Math.max(1, Math.round(Number(e.target.value))))} 
+                        onChange={(e) => {
+                          const nextWorkers = Math.max(1, Math.round(Number(e.target.value)));
+                          // #region agent log
+                          fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H1',location:'components/Gamme.tsx:ouvriers-onChange',message:'Ouvriers input changed',data:{prevWorkers:numWorkers,nextWorkers,presenceTime,totalMin,tempsArticle,pH100},timestamp:Date.now()})}).catch(()=>{});
+                          // #endregion
+                          setNumWorkers(nextWorkers);
+                        }} 
                         className="w-12 text-center bg-transparent font-black text-slate-700 outline-none text-sm p-0" 
                     />
                 </div>
@@ -1140,7 +1745,14 @@ export default function Gamme({
                         min="0" 
                         step="0.5" 
                         value={presenceTime / 60} 
-                        onChange={(e) => setPresenceTime(Math.max(0, Number(e.target.value)) * 60)} 
+                        onChange={(e) => {
+                          const nextHours = Math.max(0, Number(e.target.value));
+                          const nextPresenceTime = nextHours * 60;
+                          // #region agent log
+                          fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H2',location:'components/Gamme.tsx:heures-onChange',message:'Heures input changed',data:{prevPresenceTime:presenceTime,nextPresenceTime,numWorkers,tempsArticle,pH100,pHDerivedNoPresence},timestamp:Date.now()})}).catch(()=>{});
+                          // #endregion
+                          setPresenceTime(nextPresenceTime);
+                        }} 
                         className="w-10 text-center bg-transparent font-black text-slate-700 outline-none text-sm p-0" 
                     />
                 </div>
@@ -1172,16 +1784,28 @@ export default function Gamme({
                         type="number" 
                         min="1" max="100" 
                         value={efficiency} 
-                        onChange={(e) => setEfficiency(Math.max(1, Math.min(100, Number(e.target.value))))} 
+                        onChange={(e) => {
+                          const nextEfficiency = Math.max(1, Math.min(100, Number(e.target.value)));
+                          // #region agent log
+                          fetch('http://127.0.0.1:7458/ingest/b30750ed-ac12-45c3-b821-28526e2a963d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'057e48'},body:JSON.stringify({sessionId:'057e48',runId:'pre-fix',hypothesisId:'H4',location:'components/Gamme.tsx:rendu-onChange',message:'Rendu input changed',data:{prevEfficiency:efficiency,nextEfficiency,pH100,pHReal},timestamp:Date.now()})}).catch(()=>{});
+                          // #endregion
+                          setEfficiency(nextEfficiency);
+                        }} 
                         className="w-8 text-center bg-transparent font-black text-indigo-600 outline-none text-sm border-b border-indigo-200 p-0" 
                     />
                     <span className="text-[10px] font-bold text-indigo-400">%</span>
                 </div>
             </div>
 
-            <div className="ml-auto px-4 py-1.5 bg-purple-100 rounded-lg border border-purple-200 flex flex-col items-end shrink-0">
-                <span className="text-[9px] font-bold text-purple-500 uppercase flex items-center gap-1"><Timer className="w-3 h-3" /> T. Article</span>
-                <span className="font-black text-purple-700 text-xl leading-none">{tempsArticle.toFixed(2)}</span>
+            <div className="ml-auto flex items-center gap-2 px-3 py-1.5 bg-purple-100 rounded-lg border border-purple-200 shrink-0">
+                <div className="flex flex-col items-center border-r border-purple-200 pr-3 mr-1">
+                    <span className="text-[9px] font-bold text-purple-500 uppercase flex items-center gap-1"><Timer className="w-3 h-3" /> T. Art (min)</span>
+                    <span className="font-black text-purple-700 text-xl leading-none">{tempsArticle.toFixed(2)}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                    <span className="text-[9px] font-bold text-purple-500 uppercase">T. Art (s)</span>
+                    <span className="font-black text-purple-700 text-xl leading-none">{(tempsArticle * 60).toFixed(1)}</span>
+                </div>
             </div>
        </div>
 
@@ -1241,6 +1865,20 @@ export default function Gamme({
             document.body
         )}
 
+        {guideFeedback && createPortal(
+            <div className={`fixed top-24 right-4 sm:right-6 z-[9999] rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-sm max-w-sm animate-in fade-in slide-in-from-top-2 duration-200 ${
+                guideFeedback.tone === 'warning'
+                  ? 'bg-rose-50/95 border-rose-200 text-rose-700'
+                  : 'bg-emerald-50/95 border-emerald-200 text-emerald-700'
+            }`}>
+                <div className="flex items-start gap-2">
+                    <AlertTriangle className={`w-4 h-4 mt-0.5 shrink-0 ${guideFeedback.tone === 'warning' ? 'text-rose-500' : 'text-emerald-500'}`} />
+                    <p className="text-xs font-bold leading-relaxed">{guideFeedback.message}</p>
+                </div>
+            </div>,
+            document.body
+        )}
+
         {/* FLOATING ACTION BAR FOR SELECTION - NOW CONTROLS EXIT */}
         {isSelectionMode && !isLinkingMode && createPortal(
             <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] bg-white border border-slate-200 pl-4 pr-1.5 py-1.5 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5 duration-300 min-w-[220px]">
@@ -1270,23 +1908,25 @@ export default function Gamme({
         )}
 
         {/* RESPONSIVE TOOLBAR */}
-        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white">
-          <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
-            <ClipboardList className="w-5 h-5 text-slate-400" />
+        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white">
+          <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg shrink-0">
+            <span className="inline-flex w-8 h-8 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+              <ClipboardList className="w-4.5 h-4.5" />
+            </span>
             Gamme de Montage
           </h3>
 
           {/* ... Toolbar Content ... */}
-          <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto sm:flex-1 sm:min-w-0 sm:justify-end sm:flex-nowrap">
              
              {/* Guide Factors & Fabric */}
-             <div className="flex items-center justify-between gap-1 px-2 py-1 bg-slate-50 rounded-lg border border-slate-100 w-full sm:w-auto">
+             <div className="flex items-center justify-between gap-1.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-200 w-full sm:w-auto">
                  <label className="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap mr-1">F.Guide:</label>
                  <div className="relative">
                       <select 
                         value={globalGuide}
                         onChange={(e) => setGlobalGuide(Number(e.target.value))}
-                        className="appearance-none w-14 px-1 py-1.5 text-xs font-bold border border-slate-200 rounded focus:border-emerald-500 outline-none bg-white shadow-sm transition-all pr-4 cursor-pointer text-center"
+                        className="appearance-none w-14 px-1 py-1.5 text-xs font-bold border border-slate-200 rounded-md focus:border-emerald-500 outline-none bg-white transition-all pr-4 cursor-pointer text-center"
                       >
                          {complexityFactors.map(f => (
                            <option key={f.id} value={f.value}>{f.value}</option>
@@ -1295,24 +1935,24 @@ export default function Gamme({
                       <ChevronDown className="absolute right-0.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none" />
                  </div>
                  <button 
-                    onClick={() => setShowFabricModal(true)}
-                    className={`p-1.5 rounded-md border transition-colors shadow-sm ml-1 ${fabricSettings.enabled ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-200 text-slate-400 hover:bg-emerald-50 hover:text-emerald-700'}`}
+                    onClick={openFabricModal}
+                    className={`p-1.5 rounded-md border transition-colors ml-1 ${fabricSettings.enabled ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-200 text-slate-400 hover:bg-emerald-50 hover:text-emerald-700'}`}
                     title="Choisir selon le tissu"
                  >
                     <Shirt className="w-3.5 h-3.5" />
                  </button>
-                 <button onClick={applyGlobalGuide} title="Appliquer à toute la gamme" className="p-1.5 bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-400 rounded-md border border-slate-200 transition-colors shadow-sm ml-1">
+                 <button onClick={applyGlobalGuide} title="Appliquer à toute la gamme" className="p-1.5 bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-400 rounded-md border border-slate-200 transition-colors ml-1">
                      <ArrowDownToLine className="w-3.5 h-3.5" />
                  </button>
              </div>
 
              {/* Action Buttons Group */}
-             <div className="flex gap-2 w-full sm:w-auto">
+             <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
                  
                  {/* Selection Mode Toggle */}
                  <button 
                    onClick={() => setIsSelectionMode(!isSelectionMode)}
-                   className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-colors ${
+                   className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap ${
                        isSelectionMode 
                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200' 
                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
@@ -1325,7 +1965,7 @@ export default function Gamme({
 
                  <button 
                    onClick={() => setShowLength(prev => !prev)}
-                   className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 transition-colors"
+                   className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 transition-colors whitespace-nowrap"
                  >
                    <Ruler className="w-4 h-4" />
                    <span className="hidden sm:inline">{showLength ? 'Masquer L' : 'Afficher L'}</span>
@@ -1334,27 +1974,21 @@ export default function Gamme({
                  
                  <button 
                    onClick={handleAutoAssignGuides}
-                   className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg font-bold shadow-md shadow-orange-100 transition-all active:scale-95 text-xs uppercase tracking-wide"
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap ${
+                    missingMachineOpIds.length > 0
+                      ? 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                      : 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 hover:border-amber-300'
+                  }`}
                    title="Attribuer automatiquement les guides"
                  >
-                   <Wand2 className="w-4 h-4" />
+                   <Wand2 className="w-4 h-4 text-amber-700" />
                    <span className="hidden sm:inline">Auto-Guides</span>
                    <span className="sm:hidden">Auto</span>
                  </button>
 
                  <button 
-                   onClick={loadDemoData}
-                   className="flex-1 flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded-lg font-bold shadow-md shadow-indigo-100 transition-all active:scale-95 text-xs uppercase tracking-wide"
-                   title="Charger un modèle exemple (Blouse)"
-                 >
-                   <FileText className="w-4 h-4" />
-                   <span className="hidden sm:inline">Modèle Test</span>
-                   <span className="sm:hidden">Test</span>
-                 </button>
-
-                 <button 
                    onClick={addOperation}
-                   className="flex-1 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-emerald-100 transition-all active:scale-95 text-xs uppercase tracking-wide"
+                   className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm transition-colors text-xs uppercase tracking-wide whitespace-nowrap"
                  >
                    <Plus className="w-4 h-4" />
                    Ajouter
@@ -1392,6 +2026,9 @@ export default function Gamme({
                 
                 {/* SIDE COLUMN HEADER - COMPACT & ALWAYS VISIBLE */}
                 <th className={`py-4 px-1 w-10 text-center font-bold text-[11px] uppercase tracking-wider text-slate-400 sticky ${isSelectionMode ? 'left-20' : 'left-12'} bg-white z-20 border-r border-slate-50`} title="Côté (G/D)">C</th>
+                {sectionSplitEnabled && (
+                  <th className="py-4 px-1 w-10 text-center font-bold text-[11px] uppercase tracking-wider text-slate-400 border-r border-slate-50" title="Section (Préparation / Montage / Global)">S</th>
+                )}
                 
                 <th className="py-4 px-4 font-bold text-[11px] uppercase tracking-wider text-slate-400 min-w-[200px]">Description de l'opération</th>
                 <th className="py-4 px-4 w-40 font-bold text-[11px] uppercase tracking-wider text-slate-400">Machine</th>
@@ -1413,6 +2050,7 @@ export default function Gamme({
                      matchedMachine = machines.find(m => (m.name || '').toLowerCase().includes(val) || (m.classe || '').toLowerCase().includes(val));
                 }
                 const isMachineValid = machineValue === '' || !!matchedMachine;
+                const shouldHighlightMachine = ((!isMachineValid && machineValue) || missingMachineOpIds.includes(op.id));
                 
                 const { T_Total, isMachine, isCounterMachine } = calculateOpTimes(op, matchedMachine ? matchedMachine.id : '', machines);
                 
@@ -1425,6 +2063,8 @@ export default function Gamme({
 
                 const currentGuide = op.guideFactor ?? 1.1;
                 const assignedGuideName = op.guideName || (op.guideId ? guides.find(g => g.id === op.guideId)?.name : '') || '';
+                const assignedPostes = assignments[op.id] || [];
+                const primaryPosteColor = assignedPostes.length > 0 ? posteColorById.get(assignedPostes[0]) : undefined;
 
                 const isSelected = selectedOpIds.includes(op.id);
                 const hasGroup = !!op.groupId;
@@ -1436,7 +2076,8 @@ export default function Gamme({
                     groupClasses = `${groupStyle.bg} hover:${groupStyle.bg.replace('50','100')}`;
                     groupBorderLeft = `border-l-4 ${groupStyle.border}`;
                 }
-                
+                const checkboxBorderLeft = primaryPosteColor ? '' : groupBorderLeft;
+
                 // Highlight row when in linking mode
                 const isLinkSource = selectedOpIds.includes(op.id);
                 const isTargetRow = pendingLinkTarget === op.id;
@@ -1480,13 +2121,14 @@ export default function Gamme({
                     onDragStart={(e) => handleDragStart(e, index)}
                     onDragOver={handleDragOver}
                     onDrop={(e) => handleDrop(e, index)}
-                    className={`group transition-colors ${linkModeClasses} ${draggedIndex === index ? 'bg-emerald-50 opacity-50' : ''} ${isSelected && !isLinkingMode ? 'bg-indigo-100 hover:bg-indigo-200' : (!isLinkingMode ? 'hover:bg-slate-50' : '')} ${groupClasses}`}
+                    onDragEnd={handleDragEnd}
+                    className={`group transition-colors ${linkModeClasses} ${draggedIndex === index ? 'bg-emerald-50 opacity-50' : ''} ${isSelected && !isLinkingMode ? 'bg-indigo-100 hover:bg-indigo-200' : (!isLinkingMode ? 'hover:bg-slate-50' : '')} ${primaryPosteColor ? '' : groupClasses}`}
                   >
                     {/* CHECKBOX CELL - VISIBLE ONLY IN SELECTION MODE */}
                     {isSelectionMode && (
                         <td 
                             onClick={(e) => { e.stopPropagation(); toggleSelection(op.id); }}
-                            className={`py-3 px-2 text-center sticky left-0 z-20 border-r border-slate-100 cursor-pointer transition-colors ${groupBorderLeft} ${isSelected ? 'bg-indigo-100' : (hasGroup && groupStyle ? groupStyle.bg : 'bg-white hover:bg-slate-100')}`}
+                            className={`py-3 px-2 text-center sticky left-0 z-20 border-r border-slate-100 cursor-pointer transition-colors ${checkboxBorderLeft} ${isSelected ? 'bg-indigo-100' : (hasGroup && groupStyle ? groupStyle.bg : 'bg-white hover:bg-slate-100')}`}
                         >
                             <div className={`w-4 h-4 border rounded mx-auto flex items-center justify-center transition-colors ${isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 bg-white'}`}>
                                 {isSelected && <Check className="w-3 h-3 text-white" />}
@@ -1494,16 +2136,29 @@ export default function Gamme({
                         </td>
                     )}
 
-                    <td className={`py-3 px-2 text-center cursor-move sticky ${isSelectionMode ? 'left-8' : 'left-0'} bg-white group-hover:bg-slate-50 z-20 border-r border-transparent group-hover:border-slate-100 transition-colors ${isSelected ? 'bg-indigo-100' : (hasGroup ? groupStyle?.bg : '')} ${hasGroup ? (groupStyle ? groupStyle.text : 'text-indigo-600') + ' font-black' : ''}`}>
-                        <div className="flex items-center justify-center w-8 mx-auto gap-1 text-indigo-600 group-hover:text-emerald-600">
-                            <span className="font-mono text-xs font-bold">{getDisplayIndex(op, index)}</span>
-                            {!isLinkingMode && <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-emerald-500 transition-colors" />}
+                    <td
+                        className={`py-3 px-2 text-center cursor-move sticky ${isSelectionMode ? 'left-8' : 'left-0'} bg-white group-hover:bg-slate-50 z-20 border-r border-transparent group-hover:border-slate-100 transition-colors ${isSelected ? 'bg-indigo-100' : (hasGroup && !primaryPosteColor && groupStyle ? groupStyle.bg : '')}`}
+                    >
+                        <div className="flex items-center justify-center gap-1.5 mx-auto">
+                            {primaryPosteColor ? (
+                                <span
+                                    className="font-mono text-xs font-black inline-flex items-center justify-center min-w-[2rem] h-8 px-2 rounded-lg text-white shadow-sm ring-1 ring-black/10"
+                                    style={{ backgroundColor: primaryPosteColor.fill ?? '#6366f1' }}
+                                >
+                                    {getDisplayIndex(op, index)}
+                                </span>
+                            ) : (
+                                <span className={`font-mono text-xs font-bold ${hasGroup && groupStyle ? groupStyle.text : 'text-indigo-600'} group-hover:text-emerald-600`}>
+                                    {getDisplayIndex(op, index)}
+                                </span>
+                            )}
+                            {!isLinkingMode && <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-emerald-500 transition-colors shrink-0" />}
                         </div>
                     </td>
                     
                     {/* SIDE COLUMN - COMPACT */}
                     <td className={`py-3 px-1 text-center sticky ${isSelectionMode ? 'left-20' : 'left-12'} bg-white z-20 border-r border-slate-50 group-hover:bg-slate-50 transition-colors`}>
-                        <button 
+                        <button
                             onClick={(e) => { e.stopPropagation(); toggleSide(op.id); }}
                             className={`w-7 h-7 rounded-lg border flex items-center justify-center text-[10px] transition-all mx-auto select-none shadow-sm ${sideBadgeClass}`}
                             title="Changer Côté (G/D)"
@@ -1511,6 +2166,27 @@ export default function Gamme({
                             {sideText}
                         </button>
                     </td>
+                    {/* SECTION COLUMN */}
+                    {sectionSplitEnabled && (
+                      <td className="py-3 px-1 text-center border-r border-slate-50 group-hover:bg-slate-50 transition-colors">
+                          {(() => {
+                              const sec = op.section || 'GLOBAL';
+                              const cls = sec === 'PREPARATION' ? 'bg-blue-100 text-blue-700 border-blue-300'
+                                  : sec === 'MONTAGE' ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                                  : 'bg-slate-100 text-slate-500 border-slate-200';
+                              const text = sec === 'PREPARATION' ? 'P' : sec === 'MONTAGE' ? 'M' : '—';
+                              return (
+                                  <button
+                                      onClick={(e) => { e.stopPropagation(); toggleSection(op.id); }}
+                                      className={`w-7 h-7 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-all mx-auto select-none shadow-sm ${cls}`}
+                                      title={`Section: ${sec} (cliquer pour changer)`}
+                                  >
+                                      {text}
+                                  </button>
+                              );
+                          })()}
+                      </td>
+                    )}
 
                     <td className="py-3 px-4 relative">
                       <div className="relative w-full">
@@ -1567,7 +2243,7 @@ export default function Gamme({
                           suggestions={machineSuggestions}
                           value={machineValue}
                           onChange={(val) => handleMachineChange(op.id, val)}
-                          className={`w-full bg-slate-100/50 border border-slate-200 rounded-lg px-2 py-2 text-xs outline-none focus:border-emerald-500 focus:bg-white transition-all placeholder:text-slate-400 ${!isMachineValid && machineValue ? 'text-rose-500 font-bold border-rose-200 bg-rose-50/50' : 'text-slate-700'}`}
+                          className={`w-full bg-slate-100/50 border border-slate-200 rounded-lg px-2 py-2 text-xs outline-none focus:border-emerald-500 focus:bg-white transition-all placeholder:text-slate-400 ${shouldHighlightMachine ? 'text-rose-600 font-bold border-rose-300 bg-rose-50/70 ring-1 ring-rose-100' : 'text-slate-700'}`}
                           placeholder="Mac"
                           containerClassName="w-full"
                           disabled={isLinkingMode}
@@ -1637,7 +2313,17 @@ export default function Gamme({
                             )}
                             {!isLinkingMode && !assignedGuideName && (
                                 <button 
-                                    onClick={() => setShowGuideModal({ opId: op.id, machineName: machineValue })}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!machineValue.trim()) {
+                                            warnGuideRequirements(
+                                              [op.id],
+                                              "Impossible d'ajouter un guide sans machine. Renseignez d'abord la colonne Machine."
+                                            );
+                                            return;
+                                        }
+                                        setShowGuideModal({ opId: op.id, machineName: machineValue });
+                                    }}
                                     className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-slate-300 hover:text-orange-500 transition-colors opacity-0 group-hover/guide-col:opacity-100"
                                     title="Choisir dans la liste"
                                 >
@@ -1686,13 +2372,7 @@ export default function Gamme({
                   
                   {operations.length === 0 && (
                       <div className="flex flex-col items-center justify-center py-8 text-slate-400 border-2 border-dashed border-slate-200 rounded-xl mb-4 bg-slate-50/50">
-                          <p className="text-sm font-medium mb-3">La gamme est vide.</p>
-                          <button 
-                            onClick={loadDemoData}
-                            className="flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-lg text-xs font-bold transition-colors"
-                          >
-                              <FileText className="w-4 h-4" /> Charger un modèle test (Blouse)
-                          </button>
+                          <p className="text-sm font-medium">La gamme est vide.</p>
                       </div>
                   )}
 
@@ -1714,87 +2394,136 @@ export default function Gamme({
       {showFabricModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
             {/* Backdrop with stronger blur and dark overlay */}
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowFabricModal(false)} />
+            <div className="absolute inset-0 bg-slate-900/65 backdrop-blur-md animate-in fade-in duration-200" onClick={() => handleFabricModalClose()} />
             
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-10">
-                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white">
-                    <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                        <Shirt className="w-5 h-5 text-emerald-500" />
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="fabric-modal-title"
+                className="bg-white/95 backdrop-blur w-full max-w-md relative overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-3 duration-300 z-10 rounded-3xl border border-white/70 shadow-[0_30px_80px_-25px_rgba(15,23,42,0.45)] flex flex-col max-h-[92vh] sm:max-h-[88vh]"
+            >
+                <div className="p-4 border-b border-emerald-100/80 flex justify-between items-center bg-gradient-to-r from-emerald-50 via-white to-indigo-50">
+                    <h3 id="fabric-modal-title" className="font-black text-slate-800 flex items-center gap-2">
+                        <span className="inline-flex w-8 h-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 shadow-sm">
+                            <Shirt className="w-4 h-4" />
+                        </span>
                         Difficulté Tissu
                     </h3>
-                    <button onClick={() => setShowFabricModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
+                    <button
+                        onClick={() => handleFabricModalClose()}
+                        className="w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-400 hover:text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors flex items-center justify-center"
+                        title="Fermer"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
                 </div>
                 
-                <div className="p-5 space-y-5">
+                <div className="p-4 sm:p-5 space-y-4 overflow-y-auto custom-scrollbar min-h-0">
+                    <p className="text-xs leading-relaxed text-slate-600 bg-gradient-to-r from-slate-50 to-emerald-50/50 border border-slate-100 rounded-2xl px-3.5 py-3 animate-in fade-in duration-500">
+                        Ajustez la penalite selon le type de tissu pour affiner le temps de chaque operation machine.
+                    </p>
                     
                     {/* Difficulty Selector */}
                     <div className="space-y-3">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Niveau de difficulté</label>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Niveau de difficulte</label>
                         <div className="grid grid-cols-3 gap-2">
                             {(['easy', 'medium', 'hard'] as const).map(level => (
                                 <button
                                     key={level}
                                     onClick={() => selectFabricLevel(level)}
-                                    className={`flex flex-col items-center justify-center py-3 px-1 rounded-xl border-2 transition-all ${
-                                        fabricSettings.selected === level
-                                        ? (level === 'easy' ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : level === 'medium' ? 'bg-orange-50 border-orange-500 text-orange-700' : 'bg-rose-50 border-rose-500 text-rose-700')
-                                        : 'bg-white border-slate-100 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                                    title={`Niveau ${FABRIC_LEVEL_LABELS[level]}`}
+                                    className={`flex flex-col items-center justify-center py-3 px-1 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${
+                                        (fabricDraft || fabricSettings).selected === level
+                                        ? (level === 'easy' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-sm shadow-emerald-100' : level === 'medium' ? 'bg-orange-50 border-orange-500 text-orange-700 shadow-sm shadow-orange-100' : 'bg-rose-50 border-rose-500 text-rose-700 shadow-sm shadow-rose-100')
+                                        : 'bg-white border-slate-100 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:-translate-y-0.5'
                                     }`}
                                 >
-                                    <span className="text-xs font-bold capitalize">{level === 'easy' ? 'Facile' : level === 'medium' ? 'Moyen' : 'Difficile'}</span>
+                                    <span className="text-xs font-bold capitalize">{FABRIC_LEVEL_LABELS[level]}</span>
                                 </button>
                             ))}
                         </div>
                         
                         {/* Fabric Description Text */}
-                        <div className={`text-xs p-2 rounded-lg border text-center ${
-                            fabricSettings.selected === 'easy' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
-                            fabricSettings.selected === 'medium' ? 'bg-orange-50 border-orange-100 text-orange-600' :
+                        <div className={`text-xs p-2.5 rounded-xl border text-center ${
+                            (fabricDraft || fabricSettings).selected === 'easy' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' :
+                            (fabricDraft || fabricSettings).selected === 'medium' ? 'bg-orange-50 border-orange-100 text-orange-600' :
                             'bg-rose-50 border-rose-100 text-rose-600'
                         }`}>
                             <span className="font-bold mr-1">Exemples:</span>
-                            {fabricSettings.selected === 'easy' && "Coton, Popeline, Jersey stable"}
-                            {fabricSettings.selected === 'medium' && "Denim, Velours, Maille légère"}
-                            {fabricSettings.selected === 'hard' && "Soie, Mousseline, Cuir, Satin"}
+                            {FABRIC_LEVEL_EXAMPLES[(fabricDraft || fabricSettings).selected]}
                         </div>
                     </div>
                     
                     {/* Penalty Input */}
                     <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Pénalité (Secondes)</label>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Penalite (Secondes)</label>
                         <div className="relative">
                             <input 
                                 type="number" 
-                                value={fabricSettings.values[fabricSettings.selected]}
-                                onChange={(e) => updateFabricValue(fabricSettings.selected, Number(e.target.value))}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-lg font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
+                                min={0}
+                                max={120}
+                                step={1}
+                                value={fabricPenaltyInput}
+                                onKeyDown={(e) => ["-", "e", "+", "E", ".", ","].includes(e.key) && e.preventDefault()}
+                                onChange={(e) => handleFabricPenaltyInputChange(e.target.value)}
+                                onBlur={handleFabricPenaltyInputBlur}
+                                onWheel={(e) => (e.target as HTMLInputElement).blur()}
+                                className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-lg font-black text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all shadow-sm"
                             />
-                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 uppercase">Sec</span>
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-500 uppercase bg-slate-100 px-2 py-1 rounded-md">Sec</span>
                         </div>
-                        <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                            <Info className="w-3 h-3" /> Ajouté à chaque opération machine.
-                        </p>
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                                <Info className="w-3 h-3" /> Ajouté à chaque opération machine.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const selectedLevel = (fabricDraft || fabricSettings).selected;
+                                    updateFabricValue(selectedLevel, FABRIC_LEVEL_SUGGESTED_SECONDS[selectedLevel]);
+                                }}
+                                className="text-[10px] font-bold px-2 py-1 rounded-md border border-indigo-100 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                                title="Appliquer la valeur recommandee pour ce niveau"
+                            >
+                                Valeur recommandee
+                            </button>
+                        </div>
                     </div>
 
                     {/* Toggle */}
-                    <div className="flex items-center justify-between pt-2">
-                        <label className="flex items-center gap-3 cursor-pointer group">
-                            <div className={`w-10 h-6 rounded-full p-1 transition-colors duration-300 ${fabricSettings.enabled ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                                <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 ${fabricSettings.enabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                    <div className="flex items-center justify-between pt-1">
+                        <label className="w-full flex items-center justify-between gap-3 cursor-pointer group px-3.5 py-3 rounded-2xl border border-slate-100 bg-gradient-to-r from-slate-50 to-white hover:from-slate-100 hover:to-slate-50 transition-colors">
+                            <span className={`text-sm font-bold ${(fabricDraft || fabricSettings).enabled ? 'text-emerald-700' : 'text-slate-500'}`}>Activer la penalite</span>
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors duration-300 ${(fabricDraft || fabricSettings).enabled ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 ${(fabricDraft || fabricSettings).enabled ? 'translate-x-4' : 'translate-x-0'}`} />
                             </div>
-                            <span className={`text-sm font-bold ${fabricSettings.enabled ? 'text-emerald-700' : 'text-slate-500'}`}>Activer la pénalité</span>
                             <input 
                                 type="checkbox" 
                                 className="hidden"
-                                checked={fabricSettings.enabled} 
-                                onChange={(e) => setFabricSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                                checked={(fabricDraft || fabricSettings).enabled} 
+                                onChange={(e) => {
+                                    if (showFabricModal) {
+                                        setFabricDraft(prev => prev ? { ...prev, enabled: e.target.checked } : prev);
+                                    } else {
+                                        setFabricSettings(prev => ({ ...prev, enabled: e.target.checked }));
+                                    }
+                                }}
                             />
                         </label>
                     </div>
                     
-                    <button onClick={() => setShowFabricModal(false)} className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-emerald-200 transition-all active:scale-[0.98]">
-                        Valider
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <button
+                            type="button"
+                            onClick={() => updateFabricValue((fabricDraft || fabricSettings).selected, 0)}
+                            className="w-full py-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-2xl font-bold text-sm transition-all active:scale-[0.98]"
+                        >
+                            Réinitialiser
+                        </button>
+                        <button onClick={() => handleFabricModalClose(true)} className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-200 transition-all active:scale-[0.98]">
+                            Valider
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>,
@@ -1816,7 +2545,22 @@ export default function Gamme({
                             Machine: <span className="font-bold text-slate-600">{showGuideModal.machineName || 'Toutes'}</span>
                         </p>
                     </div>
-                    <button onClick={() => setShowGuideModal(null)} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowGuideCreateForm(prev => !prev)}
+                            disabled={!setGuides}
+                            className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-colors ${
+                                !setGuides
+                                  ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400'
+                                  : 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100'
+                            }`}
+                            title={setGuides ? "Ajouter rapidement un guide depuis cette fenetre" : "Ajout guide indisponible ici"}
+                        >
+                            + Nouveau
+                        </button>
+                        <button onClick={() => setShowGuideModal(null)} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
+                    </div>
                 </div>
                 
                 <div className="p-3 border-b border-slate-100 bg-slate-50">
@@ -1828,18 +2572,115 @@ export default function Gamme({
                             placeholder="Rechercher un guide..." 
                             value={guideSearch}
                             onChange={(e) => setGuideSearch(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (filteredGuides.length === 0) return;
+                                if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setGuideHighlightIndex(prev => Math.min(filteredGuides.length - 1, prev + 1));
+                                } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setGuideHighlightIndex(prev => Math.max(0, prev - 1));
+                                } else if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    assignGuide(showGuideModal.opId, filteredGuides[Math.min(guideHighlightIndex, filteredGuides.length - 1)]);
+                                }
+                            }}
                             className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-orange-400 transition-all"
                         />
                     </div>
+
+                    {recentGuidesForMachine.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            {recentGuidesForMachine.map(guide => (
+                                <button
+                                    key={guide.id}
+                                    type="button"
+                                    onClick={() => assignGuide(showGuideModal.opId, guide)}
+                                    className="px-2 py-1 rounded-full text-[10px] font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                                    title="Guide frequent pour cette machine"
+                                >
+                                    {guide.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {guideModalSuggestion && (
+                        <button
+                            type="button"
+                            onClick={() => assignGuide(showGuideModal.opId, guideModalSuggestion.guide)}
+                            className="mt-2 w-full text-left px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition-colors"
+                        >
+                            <p className="text-[10px] uppercase tracking-wide font-black text-emerald-600">Suggestion apprise</p>
+                            <p className="text-sm font-bold text-emerald-800">{guideModalSuggestion.guide.name}</p>
+                            <p className="text-[11px] text-emerald-700">Confiance: {Math.round(guideModalSuggestion.confidence * 100)}%</p>
+                        </button>
+                    )}
+
+                    {showGuideCreateForm && (
+                        <div className="mt-2 p-2.5 rounded-xl bg-white border border-orange-100 space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input
+                                    type="text"
+                                    value={quickGuideDraft.name || ''}
+                                    onChange={(e) => {
+                                        setQuickGuideDraft(prev => ({ ...prev, name: e.target.value }));
+                                        if (guideCreateErrors.name) setGuideCreateErrors(prev => ({ ...prev, name: false }));
+                                    }}
+                                    placeholder="Nom guide*"
+                                    className={`w-full px-2.5 py-2 rounded-lg text-xs outline-none transition-all ${guideCreateErrors.name ? 'border border-rose-300 bg-rose-50' : 'border border-slate-200 bg-slate-50 focus:border-orange-400'}`}
+                                />
+                                <input
+                                    type="text"
+                                    value={quickGuideDraft.category || ''}
+                                    onChange={(e) => setQuickGuideDraft(prev => ({ ...prev, category: e.target.value }))}
+                                    placeholder="Categorie"
+                                    className="w-full px-2.5 py-2 rounded-lg text-xs outline-none border border-slate-200 bg-slate-50 focus:border-orange-400 transition-all"
+                                />
+                            </div>
+                            <input
+                                type="text"
+                                value={quickGuideDraft.machineType || ''}
+                                onChange={(e) => {
+                                    setQuickGuideDraft(prev => ({ ...prev, machineType: e.target.value }));
+                                    if (guideCreateErrors.machineType) setGuideCreateErrors(prev => ({ ...prev, machineType: false }));
+                                }}
+                                placeholder="Machine cible*"
+                                className={`w-full px-2.5 py-2 rounded-lg text-xs outline-none transition-all ${guideCreateErrors.machineType ? 'border border-rose-300 bg-rose-50' : 'border border-slate-200 bg-slate-50 focus:border-orange-400'}`}
+                            />
+                            <input
+                                type="text"
+                                value={quickGuideDraft.description || ''}
+                                onChange={(e) => setQuickGuideDraft(prev => ({ ...prev, description: e.target.value }))}
+                                placeholder="Description rapide"
+                                className="w-full px-2.5 py-2 rounded-lg text-xs outline-none border border-slate-200 bg-slate-50 focus:border-orange-400 transition-all"
+                            />
+                            {(guideCreateErrors.name || guideCreateErrors.machineType) && (
+                                <p className="text-[10px] font-bold text-rose-600">Nom guide et machine sont obligatoires.</p>
+                            )}
+                            <button
+                                type="button"
+                                onClick={handleCreateGuideFromModal}
+                                className="w-full px-3 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-colors"
+                            >
+                                Enregistrer + Assigner
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-1">
                     {filteredGuides.length > 0 ? (
-                        filteredGuides.map(guide => (
+                        filteredGuides.map((guide, index) => (
                             <button 
                                 key={guide.id}
                                 onClick={() => assignGuide(showGuideModal.opId, guide)}
-                                className="w-full text-left p-3 rounded-xl hover:bg-orange-50 border border-transparent hover:border-orange-100 transition-all group flex items-start gap-3"
+                                onMouseEnter={() => setGuideHighlightIndex(index)}
+                                className={`w-full text-left p-3 rounded-xl border transition-all group flex items-start gap-3 ${
+                                    index === guideHighlightIndex
+                                      ? 'bg-orange-50 border-orange-200'
+                                      : 'hover:bg-orange-50 border-transparent hover:border-orange-100'
+                                }`}
                             >
                                 <div className="w-10 h-10 rounded-lg bg-white border border-slate-100 flex items-center justify-center text-orange-500 shadow-sm group-hover:scale-110 transition-transform">
                                     <Component className="w-5 h-5" />
@@ -1858,7 +2699,7 @@ export default function Gamme({
                         <div className="py-8 text-center">
                             <Layers className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                             <p className="text-sm text-slate-400">Aucun guide trouvé.</p>
-                            {guideSearch && <p className="text-xs text-slate-300 mt-1">Essayez un autre terme ou vérifiez la machine.</p>}
+                            {guideSearch && <p className="text-xs text-slate-300 mt-1">Essayez un autre terme ou créez un nouveau guide.</p>}
                         </div>
                     )}
                 </div>
@@ -1870,7 +2711,7 @@ export default function Gamme({
       {/* CONTEXT MENU - USING PORTAL - FIXED TO PAGE COORDS */}
       {contextMenu && contextMenu.visible && createPortal(
         <div 
-            className={`absolute z-[9999] bg-white border border-slate-200 rounded-xl shadow-2xl py-1.5 w-64 text-xs font-bold text-slate-700 animate-in fade-in zoom-in-95 duration-100 overflow-hidden ring-4 ring-slate-100/50 flex flex-col max-h-[85vh] ${contextMenu.align === 'bottom' ? 'origin-bottom-left' : 'origin-top-left'}`}
+            className={`absolute z-[9999] bg-white/95 backdrop-blur border border-slate-200/80 rounded-2xl shadow-[0_22px_60px_-20px_rgba(15,23,42,0.4)] py-2 w-64 text-xs font-bold text-slate-700 animate-in fade-in zoom-in-95 slide-in-from-top-1 duration-150 overflow-hidden ring-1 ring-slate-100/70 flex flex-col max-h-[85vh] ${contextMenu.align === 'bottom' ? 'origin-bottom-left' : 'origin-top-left'}`}
             style={{ 
                 top: contextMenu.y, 
                 left: contextMenu.x,
@@ -1878,11 +2719,14 @@ export default function Gamme({
             }}
             onClick={(e) => e.stopPropagation()} 
         >
-            <div className="overflow-y-auto custom-scrollbar flex-1">
+            <div className="px-3 pb-2 pt-0.5 border-b border-slate-100">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Actions Rapides</p>
+            </div>
+            <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
             {/* LINKING ACTION: Only show if items are selected AND clicking on a different row */}
             {isSelectionMode && selectedOpIds.length > 0 && !selectedOpIds.includes(contextMenu.opId!) && (
                 <>
-                    <button onClick={() => handleContextAction('targetThis')} className="w-full text-left px-4 py-3 hover:bg-emerald-50 flex items-center gap-2.5 transition-colors group text-emerald-700 bg-emerald-50/50">
+                    <button onClick={() => handleContextAction('targetThis')} className="w-full text-left px-4 py-3 hover:bg-emerald-50 flex items-center gap-2.5 transition-all group text-emerald-700 bg-emerald-50/50 hover:translate-x-0.5">
                         <ArrowLeftToLine className="w-4 h-4 text-emerald-600" /> 
                         <span>🏁 Lier la sélection ici (Flux)</span>
                     </button>
@@ -1893,7 +2737,7 @@ export default function Gamme({
             {/* Quick Action: Select Group */}
             {isPartOfGroup && (
                 <>
-                    <button onClick={() => handleContextAction('selectGroup')} className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 flex items-center gap-2.5 transition-colors group">
+                    <button onClick={() => handleContextAction('selectGroup')} className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                         <Layers className="w-4 h-4 text-indigo-600" /> 
                         <span>Sélectionner Groupe</span>
                     </button>
@@ -1902,52 +2746,52 @@ export default function Gamme({
             )}
 
             {/* NEW: LINK FLUX ACTION - Manual Trigger */}
-            <button onClick={() => handleContextAction('setFlux')} className="w-full text-left px-4 py-2.5 hover:bg-emerald-50 flex items-center gap-2.5 transition-colors group text-slate-600 hover:text-emerald-700">
+            <button onClick={() => handleContextAction('setFlux')} className="w-full text-left px-4 py-2.5 hover:bg-emerald-50 flex items-center gap-2.5 transition-all group text-slate-600 hover:text-emerald-700 hover:translate-x-0.5">
                 <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500" /> 
                 <span>Définir Flux / Destination</span>
             </button>
             <div className="h-px bg-slate-100 my-1 mx-2"></div>
 
-            <button onClick={() => handleContextAction('select')} className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 flex items-center gap-2.5 transition-colors group">
+            <button onClick={() => handleContextAction('select')} className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                 <CheckSquare className={`w-4 h-4 ${selectedOpIds.includes(contextMenu.opId!) ? 'text-indigo-600' : 'text-slate-400'}`} /> 
                 <span>{selectedOpIds.includes(contextMenu.opId!) ? 'Désélectionner' : 'Sélectionner'}</span>
             </button>
             <div className="h-px bg-slate-100 my-1 mx-2"></div>
-            <button onClick={() => handleContextAction('link')} disabled={selectedOpIds.length < 2} className={`w-full text-left px-4 py-2.5 hover:bg-emerald-50 flex items-center gap-2.5 transition-colors group ${selectedOpIds.length < 2 ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            <button onClick={() => handleContextAction('link')} disabled={selectedOpIds.length < 2} className={`w-full text-left px-4 py-2.5 hover:bg-emerald-50 flex items-center gap-2.5 transition-all group ${selectedOpIds.length < 2 ? 'opacity-50 cursor-not-allowed' : 'hover:translate-x-0.5'}`}>
                 <LinkIcon className="w-4 h-4 text-emerald-500" /> 
                 <span>Grouper / Lier ({selectedOpIds.length})</span>
             </button>
-            <button onClick={() => handleContextAction('unlink')} className="w-full text-left px-4 py-2.5 hover:bg-orange-50 flex items-center gap-2.5 transition-colors group">
+            <button onClick={() => handleContextAction('unlink')} className="w-full text-left px-4 py-2.5 hover:bg-orange-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                 <Unlink className="w-4 h-4 text-orange-500" /> 
                 <span>Dégrouper</span>
             </button>
             <div className="h-px bg-slate-100 my-1 mx-2"></div>
-            <button onClick={() => handleContextAction('insert')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-colors group">
+            <button onClick={() => handleContextAction('insert')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                 <Plus className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" /> 
                 <span>Insérer Poste</span>
             </button>
-            <button onClick={() => handleContextAction('duplicate')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-colors group">
+            <button onClick={() => handleContextAction('duplicate')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                 <CopyPlus className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" /> 
                 <span>Dupliquer</span>
             </button>
-            <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-colors group">
+            <button onClick={() => handleContextAction('cut')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                 <Scissors className="w-4 h-4 text-slate-400 group-hover:text-slate-600" /> 
                 <span>Couper</span>
             </button>
-            <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-colors group">
+            <button onClick={() => handleContextAction('copy')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-all group hover:translate-x-0.5">
                 <Copy className="w-4 h-4 text-slate-400 group-hover:text-slate-600" /> 
                 <span>Copier</span>
             </button>
-            <button onClick={() => handleContextAction('paste')} disabled={!clipboard} className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-colors group ${!clipboard ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            <button onClick={() => handleContextAction('paste')} disabled={!clipboard} className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center gap-2.5 transition-all group ${!clipboard ? 'opacity-50 cursor-not-allowed' : 'hover:translate-x-0.5'}`}>
                 <Clipboard className="w-4 h-4 text-slate-400 group-hover:text-slate-600" /> 
                 <span>Coller</span>
             </button>
             <div className="h-px bg-slate-100 my-1 mx-2"></div>
-            <button onClick={() => handleContextAction('clear')} className="w-full text-left px-4 py-2.5 hover:bg-amber-50 flex items-center gap-2.5 text-amber-600 transition-colors">
+            <button onClick={() => handleContextAction('clear')} className="w-full text-left px-4 py-2.5 hover:bg-amber-50 flex items-center gap-2.5 text-amber-600 transition-all hover:translate-x-0.5">
                 <Eraser className="w-4 h-4" /> 
                 <span>Vider le contenu</span>
             </button>
-            <button onClick={() => handleContextAction('delete')} className="w-full text-left px-4 py-2.5 hover:bg-rose-50 flex items-center gap-2.5 text-rose-600 transition-colors">
+            <button onClick={() => handleContextAction('delete')} className="w-full text-left px-4 py-2.5 hover:bg-rose-50 flex items-center gap-2.5 text-rose-600 transition-all hover:translate-x-0.5">
                 <Trash2 className="w-4 h-4" /> 
                 <span>Supprimer</span>
             </button>

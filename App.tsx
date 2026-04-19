@@ -29,6 +29,7 @@ import Machin from './components/Machin';
 import Profil from './components/Profil';
 import Planning from './components/Planning';
 import SuiviProduction from './components/SuiviProduction';
+import RendementBoard from './components/RendementBoard';
 import Dashboard from './components/Dashboard';
 import Magasin from './components/Magasin';
 import Atelier from './components/Atelier';
@@ -36,7 +37,7 @@ import AdminDashboard from './src/components/AdminDashboard';
 import { useAuth } from './src/context/AuthContext';
 import Login from './src/components/Login';
 import Signup from './src/components/Signup';
-import { Machine, Operation, FicheData, Poste, SpeedFactor, ComplexityFactor, StandardTime, Guide, ModelData, AppSettings } from './types';
+import { Machine, Operation, FicheData, Poste, SpeedFactor, ComplexityFactor, StandardTime, Guide, ModelData, AppSettings, ManualLink } from './types';
 import Configuration from './components/Configuration';
 import StockExport from './components/StockExport';
 import LicenseScreen from './components/LicenseScreen';
@@ -179,12 +180,53 @@ const DEFAULT_GUIDES: Guide[] = [
 
 const AUTO_SAVE_KEY = 'beramethode_autosave_v1';
 const LIBRARY_KEY = 'beramethode_library'; // New Key for Persistence
+const MANUAL_LINKS_BY_MODEL_KEY = 'beramethode_manual_links_by_model';
 
 // History State Type
 type HistoryState = {
     operations: Operation[];
     assignments: Record<string, string[]>;
     postes: Poste[];
+};
+
+const normalizeLoadedLayout = (layout: unknown): 'zigzag' | 'free' | 'line' | 'double-zigzag' => {
+    if (layout === 'free' || layout === 'line' || layout === 'double-zigzag') return layout;
+    if (layout === 'zigzag' || layout === 'snake' || layout === 'grid' || layout === 'wheat') return 'double-zigzag';
+    return 'double-zigzag';
+};
+
+const loadManualLinksByModel = (modelId: string): ManualLink[] => {
+    try {
+        const raw = localStorage.getItem(MANUAL_LINKS_BY_MODEL_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw) as Record<string, ManualLink[]>;
+        return parsed[modelId] || [];
+    } catch {
+        return [];
+    }
+};
+
+const saveManualLinksByModel = (modelId: string, links: ManualLink[]) => {
+    try {
+        const raw = localStorage.getItem(MANUAL_LINKS_BY_MODEL_KEY);
+        const parsed = raw ? (JSON.parse(raw) as Record<string, ManualLink[]>) : {};
+        parsed[modelId] = links;
+        localStorage.setItem(MANUAL_LINKS_BY_MODEL_KEY, JSON.stringify(parsed));
+    } catch {
+        // Silent fail: main project save still succeeds
+    }
+};
+
+const deleteManualLinksByModel = (modelId: string) => {
+    try {
+        const raw = localStorage.getItem(MANUAL_LINKS_BY_MODEL_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as Record<string, ManualLink[]>;
+        delete parsed[modelId];
+        localStorage.setItem(MANUAL_LINKS_BY_MODEL_KEY, JSON.stringify(parsed));
+    } catch {
+        // Silent fail
+    }
 };
 
 export default function App() {
@@ -219,7 +261,8 @@ export default function App() {
             await new Promise(r => setTimeout(r, 400));
             if (isCancelled) return;
             setAppLoading(prev => ({ ...prev, progress: 100, subText: 'Prêt.' }));
-            await new Promise(r => setTimeout(r, 250));
+            // Brief beat so 100% + « Prêt. » are visible before unmount (GlobalLoader snaps at 100%).
+            await new Promise(r => setTimeout(r, 380));
             if (isCancelled) return;
             setAppLoading(prev => ({ ...prev, isActive: false }));
         };
@@ -260,7 +303,7 @@ export default function App() {
     }, [isGuest, user, authLoading]);
 
     // --- STATE: NAVIGATION ---
-    const [currentView, setCurrentView] = useState<'dashboard' | 'ingenierie' | 'atelier' | 'library' | 'coupe' | 'effectifs' | 'planning' | 'suivi' | 'magasin' | 'export' | 'config' | 'parametres' | 'profil' | 'admin'>('dashboard');
+    const [currentView, setCurrentView] = useState<'dashboard' | 'ingenierie' | 'atelier' | 'library' | 'coupe' | 'effectifs' | 'planning' | 'suivi' | 'magasin' | 'export' | 'config' | 'parametres' | 'profil' | 'admin' | 'rendement'>('dashboard');
     // Deep link: e.g. http://127.0.0.1:8000/#magasin
     useEffect(() => {
         const ALLOW = new Set([
@@ -324,7 +367,15 @@ export default function App() {
 
     // --- STATE: LAYOUT MEMORY (Lifted Up) ---
     const [layoutMemory, setLayoutMemory] = useState<Record<string, { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[]>>({});
-    const [activeLayout, setActiveLayout] = useState<'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line'>('zigzag'); // NEW: Track active layout
+    const [activeLayout, setActiveLayout] = useState<'zigzag' | 'free' | 'line' | 'double-zigzag'>('double-zigzag');
+    const [manualLinks, setManualLinks] = useState<ManualLink[]>(() => {
+        try {
+            const saved = localStorage.getItem('beramethode_manual_links');
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
     const [savedPlantations, setSavedPlantations] = useState<{ id: string, name: string, date: string, layoutType: string, postes: { id: string, x?: number, y?: number, isPlaced?: boolean, rotation?: number }[] }[]>([]); // NEW: Manual saves
 
     // --- STATE: GLOBAL DATA (MACHINES & CONFIG) ---
@@ -476,8 +527,14 @@ export default function App() {
     };
 
     // --- REST OF STATE ---
+    const launchDateTimeIso = (date: string, launchTime?: string) => {
+        const t = launchTime && /^\d{2}:\d{2}$/.test(launchTime) ? launchTime : '08:00';
+        return `${date}T${t}:00`;
+    };
+
     const [ficheData, setFicheData] = useState<FicheData>({
         date: new Date().toISOString().split('T')[0],
+        launchTime: '08:00',
         client: '',
         category: '',
         designation: '',
@@ -517,7 +574,16 @@ export default function App() {
                     if (parsed.numWorkers) setNumWorkers(parsed.numWorkers);
                     if (parsed.presenceTime) setPresenceTime(parsed.presenceTime);
                     if (parsed.layoutMemory) setLayoutMemory(parsed.layoutMemory);
-                    if (parsed.activeLayout) setActiveLayout(parsed.activeLayout);
+                    if (parsed.activeLayout) {
+                        const normalized = normalizeLoadedLayout(parsed.activeLayout);
+                        if (normalized === 'free') {
+                            const hasPlaced = (parsed.postes || []).some((p: any) => p.isPlaced && p.machine !== 'VIDE');
+                            setActiveLayout(hasPlaced ? 'free' : 'double-zigzag');
+                        } else {
+                            setActiveLayout(normalized);
+                        }
+                    }
+                    if (parsed.manualLinks) setManualLinks(parsed.manualLinks);
                     if (parsed.savedPlantations) setSavedPlantations(parsed.savedPlantations);
                     if (parsed.chronoData) setChronoData(parsed.chronoData); // NEW: Load chrono data
 
@@ -552,6 +618,7 @@ export default function App() {
                 presenceTime,
                 layoutMemory,
                 activeLayout,
+                manualLinks,
                 savedPlantations,
                 chronoData, // NEW: Save chrono data
                 lastSaved: Date.now()
@@ -567,7 +634,11 @@ export default function App() {
         }, 2000); // Save after 2 seconds of inactivity
 
         return () => clearTimeout(timer);
-    }, [currentModelId, articleName, operations, assignments, postes, ficheData, ficheImages, efficiency, numWorkers, presenceTime, layoutMemory, activeLayout, savedPlantations, chronoData]);
+    }, [currentModelId, articleName, operations, assignments, postes, ficheData, ficheImages, efficiency, numWorkers, presenceTime, layoutMemory, activeLayout, manualLinks, savedPlantations, chronoData]);
+
+    useEffect(() => {
+        localStorage.setItem('beramethode_manual_links', JSON.stringify(manualLinks));
+    }, [manualLinks]);
 
 
     // --- DERIVED STATS ---
@@ -639,7 +710,16 @@ export default function App() {
     // --- RENDERING CONDITIONS ---
     // License screen removed - app opens directly
 
-    if (authLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    if (authLoading) {
+        return (
+            <GlobalLoader
+                isActive
+                progress={18}
+                text="BERAMETHODE V2"
+                subText="Vérification de la session..."
+            />
+        );
+    }
 
     if (!user && !isGuest) {
         return authView === 'login'
@@ -664,13 +744,7 @@ export default function App() {
     };
 
     const saveCurrentModel = () => {
-        // 1. VALIDATION: Category is mandatory
-        if (!ficheData.category || ficheData.category.trim() === '') {
-            alert("Erreur : La catégorie (Famille produit) est obligatoire pour sauvegarder. Veuillez la renseigner dans la Fiche Technique.");
-            return;
-        }
-
-        // 2. PREPARE DATA
+        // 1. PREPARE DATA
         // Update layoutMemory with current postes state for the active layout
         const currentLayoutSnapshot = postes.map(p => ({
             id: p.id,
@@ -683,6 +757,9 @@ export default function App() {
         setLayoutMemory(updatedLayoutMemory); // Update state as well
 
         // If updating, keep existing ID and date_creation. If new, generate.
+        const persistedActiveLayout: 'zigzag' | 'snake' | 'grid' | 'wheat' | 'free' | 'line' =
+            activeLayout === 'double-zigzag' ? 'zigzag' : activeLayout;
+
         const modelToSave: ModelData = {
             id: currentModelId || Date.now().toString(),
             filename: `${articleName || 'Sans_Nom'}.json`,
@@ -696,6 +773,7 @@ export default function App() {
                     ? (models.find(m => m.id === currentModelId)?.meta_data.date_creation || new Date().toISOString())
                     : new Date().toISOString(),
                 date_lancement: ficheData.date,
+                heure_lancement: ficheData.launchTime ?? '08:00',
                 total_temps: globalStats.tempsArticle,
                 effectif: numWorkers,
                 sizes: ficheData.sizes,
@@ -707,9 +785,17 @@ export default function App() {
                 postes: postes,
                 assignments: assignments,
                 layoutMemory: updatedLayoutMemory,
-                activeLayout: activeLayout
+                activeLayout: persistedActiveLayout
             }
         };
+
+        saveManualLinksByModel(modelToSave.id, manualLinks);
+
+        setPlanningEvents(prev => prev.map(ev =>
+            ev.modelId === modelToSave.id
+                ? { ...ev, dateLancement: launchDateTimeIso(ficheData.date, ficheData.launchTime), startDate: ficheData.date }
+                : ev
+        ));
 
         // 3. UPDATE OR ADD
         if (user) {
@@ -767,11 +853,15 @@ export default function App() {
 
         // Load Complete FicheData if available, else fallback to meta_data assembly
         if (model.ficheData) {
-            setFicheData(model.ficheData);
+            setFicheData({
+                ...model.ficheData,
+                launchTime: model.ficheData.launchTime ?? model.meta_data.heure_lancement ?? '08:00',
+            });
         } else {
             setFicheData(prev => ({
                 ...prev,
                 date: model.meta_data.date_lancement || new Date().toISOString().split('T')[0],
+                launchTime: model.meta_data.heure_lancement ?? '08:00',
                 category: model.meta_data.category || '',
                 sizes: model.meta_data.sizes || [],
                 colors: model.meta_data.colors || [],
@@ -794,13 +884,15 @@ export default function App() {
             setPostes(model.implantation.postes || []);
             setAssignments(model.implantation.assignments || {});
             setLayoutMemory(model.implantation.layoutMemory || {});
-            setActiveLayout(model.implantation.activeLayout || 'zigzag');
+            setActiveLayout(normalizeLoadedLayout(model.implantation.activeLayout));
+            setManualLinks(loadManualLinksByModel(model.id));
         } else {
             // Reset assignments if not in saved model (legacy support)
             setAssignments({});
             setPostes([]);
             setLayoutMemory({});
-            setActiveLayout('zigzag');
+            setActiveLayout('double-zigzag');
+            setManualLinks([]);
         }
 
         // Reset History
@@ -836,18 +928,21 @@ export default function App() {
                 .then(res => {
                     if (res.ok) {
                         setModels(prev => prev.filter(m => m.id !== id));
+                        deleteManualLinksByModel(id);
                         if (currentModelId === id) setCurrentModelId(null);
                     }
                 })
                 .catch(err => console.error(err));
         } else {
             setModels(prev => prev.filter(m => m.id !== id));
+            deleteManualLinksByModel(id);
             if (currentModelId === id) setCurrentModelId(null);
         }
     };
 
     const duplicateModel = (model: ModelData) => {
         const copy = { ...model, id: Date.now().toString(), meta_data: { ...model.meta_data, nom_modele: model.meta_data.nom_modele + ' (Copie)' } };
+        saveManualLinksByModel(copy.id, loadManualLinksByModel(model.id));
         setModels(prev => [copy, ...prev]);
     };
 
@@ -878,9 +973,16 @@ export default function App() {
         setAssignments({});
         setPostes([]);
         setLayoutMemory({});
-        setActiveLayout('zigzag');
+        setActiveLayout('double-zigzag');
+        setManualLinks([]);
         setChronoData({}); // NEW: Reset chrono data
-        setFicheData(prev => ({ ...prev, category: '', designation: '' }));
+        setFicheData(prev => ({
+            ...prev,
+            date: new Date().toISOString().split('T')[0],
+            launchTime: '08:00',
+            category: '',
+            designation: '',
+        }));
 
         // Reset History
         setHistory([{ operations: [], assignments: {}, postes: [] }]);
@@ -896,10 +998,19 @@ export default function App() {
                 <div className="h-full px-4 flex items-center justify-between">
                     {/* Logo Section */}
                     <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 bg-emerald-600 rounded-lg flex items-center justify-center font-black text-sm text-white shadow-sm shadow-emerald-100">
-                            B
-                        </div>
-                        <span className="font-extrabold text-lg tracking-tight text-gray-900 hidden sm:block">
+                        <button
+                            type="button"
+                            aria-label="Retour au tableau de bord"
+                            onClick={() => setCurrentView('dashboard')}
+                            className="group relative hidden sm:inline-flex items-center justify-center px-1 py-0.5 rounded-sm border-none transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                        >
+                            <span
+                                className={`relative font-extrabold text-lg tracking-tight transition-all duration-200 [text-shadow:none] group-hover:[text-shadow:0_1px_3px_rgba(16,185,129,0.4),0_2px_8px_rgba(16,185,129,0.22)] ${currentView === 'dashboard' ? 'text-gray-900' : 'text-gray-800 group-hover:text-emerald-700'}`}
+                            >
+                                BERA<span className="text-emerald-600">METHODE</span>
+                            </span>
+                        </button>
+                        <span className="font-extrabold text-lg tracking-tight text-gray-900 sm:hidden">
                             BERA<span className="text-emerald-600">METHODE</span>
                         </span>
 
@@ -998,6 +1109,16 @@ export default function App() {
                         >
                             <Activity className="w-3.5 h-3.5" />
                             Suivi P°
+                        </button>
+                        <button
+                            onClick={() => setCurrentView('rendement')}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border ${currentView === 'rendement'
+                                ? 'bg-violet-50 border-violet-100 text-violet-700'
+                                : 'bg-transparent border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                                }`}
+                        >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                            Rendement
                         </button>
                         <button
                             onClick={() => setCurrentView('magasin')}
@@ -1123,6 +1244,7 @@ export default function App() {
                         complexityFactors={complexityFactors}
                         standardTimes={standardTimes}
                         guides={guides}
+                        setGuides={setGuides}
 
                         articleName={articleName}
                         setArticleName={setArticleName}
@@ -1156,6 +1278,8 @@ export default function App() {
                         setLayoutMemory={setLayoutMemory}
                         activeLayout={activeLayout}
                         setActiveLayout={setActiveLayout}
+                        manualLinks={manualLinks}
+                        setManualLinks={setManualLinks}
 
                         chronoData={chronoData}
                         setChronoData={setChronoData}
@@ -1219,6 +1343,15 @@ export default function App() {
                         suivis={suivis}
                         setSuivis={setSuivis}
                         planningEvents={planningEvents}
+                        settings={globalSettings}
+                    />
+                )}
+
+                {currentView === 'rendement' && (
+                    <RendementBoard
+                        models={models}
+                        planningEvents={planningEvents}
+                        suivis={suivis}
                         settings={globalSettings}
                     />
                 )}
