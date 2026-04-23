@@ -176,6 +176,52 @@ export interface AppTask {
   createdAt: string;
 }
 
+// --- TASK MANAGEMENT & HR DIRECTORY ---
+export type EmployeeRole = 'OPERATOR' | 'SUPERVISOR' | 'MECHANIC' | 'ADMIN';
+
+export interface Employee {
+  id: string;
+  fullName: string;
+  phoneNumber: string;
+  role: EmployeeRole;
+  chaineId?: string;
+  isActive: boolean;
+}
+
+export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'PENDING' | 'DONE_OK' | 'DONE_NOT_OK' | 'SKIPPED';
+
+export interface Task {
+  id: string;
+  title?: string;
+  description?: string;
+  assignedTo?: string;       // Employee.id
+  assignedBy?: string;       // creator user id/name
+  createdAt: string;        // ISO String
+  completedAt?: string;     // ISO String
+  status: TaskStatus;
+  text?: string;
+  assigneeName?: string;
+  assigneeRole?: string;
+  skipReason?: string;
+  date?: string;
+  isDone?: boolean;
+}
+
+export interface CompanyProfile {
+  companyName: string;
+  legalName: string;
+  slogan?: string;
+  logo?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  description?: string;
+  operatingCostsMonthly?: number;
+}
+
 export interface AppSettings {
   // --- EXISTING FINANCIAL SETTINGS ---
   costMinute: number;
@@ -196,8 +242,11 @@ export interface AppSettings {
   chainNames?: Record<string, string>; // NEW: custom chain names matching "CHAINE 1" => "My Custom Chain"
   organigram: { id: string, name: string, role: string, parentId?: string }[]; // General Managers
   chainStaff: Record<string, { id: string, name: string, role: string }[]>; // Staff/Supervisors per chain
+  companyProfile: CompanyProfile;
+  chainCapacityPerDay?: Record<string, number>; // CHAINE X -> capacity/day
   calendarExceptions?: Record<string, { isWorking: boolean, note: string }>; // Key: 'YYYY-MM-DD', for specific holidays or extra working days
-  tasks?: AppTask[]; // Task management system
+  tasks?: Task[]; // Updated to the new Task interface
+  employees?: Employee[]; // New: Centralized HR directory
 }
 
 export interface PdfSettings {
@@ -327,7 +376,19 @@ export type PlanningEvent = {
   prepEnd?: string;          // calculé
   montageStart?: string;     // calculé: max(prepEnd, fournisseurDate)
   montageEnd?: string;       // calculé = dateExport
+  lots_data?: Lot[];         // Phase 2: Sous-commandes
+  color?: string;            // Couleur identifiant l'OF dans le Suivi
 };
+
+export interface Lot {
+  id: string;
+  taille: string;
+  couleur: string;
+  quantite: number;
+  deadline: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'READY' | 'DELIVERED';
+  dateDelivered?: string;
+}
 
 export interface SectionEffectif {
   total: number;
@@ -354,12 +415,22 @@ export type SuiviData = {
   enCour: number;
   resteEntrer: number;
   resteSortie: number;
-  machinistes: number;
-  tracage: number;
-  preparation: number;
-  finition: number;
-  controle: number;
-  absent?: number; // Added optional absent tracking
+  // Legacy effectifs (kept for backward compatibility)
+  machinistes?: number;
+  tracage?: number;
+  preparation?: number;
+  finition?: number;
+  controle?: number;
+  // AJANIF-standard effectifs
+  chaf?: number;
+  recta?: number;
+  sujet?: number;
+  transp?: number;
+  man?: number;
+  sp?: number;
+  stager?: number;
+  ouvriers_modele?: number; // Ouvriers dédiés au modèle (dénominateur R%)
+  absent?: number;
   totalWorkers: number;
   downtimes?: Record<string, string>; // NEW: Phase 13 - Reasons for missed targets
   defauts?: { id: string; hour: string; type: string; quantity: number; notes: string }[]; // NEW: Phase 13 - In-Line QC
@@ -368,6 +439,24 @@ export type SuiviData = {
   activeSection?: 'PREPARATION' | 'MONTAGE' | 'BOTH';
   sectionEffectif?: { preparation: SectionEffectif; montage: SectionEffectif };
   sectionOutput?: { preparation: number; montage: number };
+};
+
+export type PosteSuiviData = {
+  id: string;
+  planningId: string;
+  modelId: string;
+  posteId: string;
+  workerId?: string;
+  date: string;
+  heure_debut?: string;
+  heure_fin?: string;
+  pieces_entrees: number;
+  pieces_sorties: number;
+  pieces_defaut: number;
+  temps_reel_par_piece?: number;
+  temps_prevu_par_piece?: number;
+  notes?: string;
+  problemes: string[];
 };
 
 // --- TYPES FOR MAGASIN & ATELIER ---
@@ -402,4 +491,137 @@ export interface DemandeAppro {
   demandeur: string;
   notes?: string;
   statut: 'attente' | 'preparee' | 'livree' | 'rejetee';
+}
+
+// ═══════════════════════════════════════════════════════════
+// PHASE 5 — HR MODULE TYPES (RH Complet + Sage Paie)
+// ═══════════════════════════════════════════════════════════
+
+export type HRWorkerRole = 'OPERATOR' | 'SUPERVISOR' | 'MECHANIC' | 'ADMIN' | 'QC' | 'IRON' | 'CUTTER' | 'PACKER';
+export type HRContractType = 'CDI' | 'CDD' | 'ANAPEC' | 'STAGE';
+export type HRPointageStatus = 'PRESENT' | 'ABSENT' | 'CONGE' | 'MALADIE' | 'RETARD' | 'MISSION' | 'FERIE';
+export type HRPointageSource = 'MANUAL' | 'RFID' | 'FINGERPRINT' | 'FACE';
+export type HRAvanceStatut = 'DEMANDE' | 'APPROUVE' | 'EN_COURS' | 'REMBOURSE' | 'REFUSE' | 'ANNULE';
+
+export interface HRWorker {
+  id: string;
+  matricule: string;
+  full_name: string;
+  cin?: string;
+  cnss?: string;
+  phone?: string;
+  date_naissance?: string;
+  adresse?: string;
+  photo?: string;
+  sexe?: 'M' | 'F';
+  role: HRWorkerRole;
+  chaine_id?: string;
+  poste?: string;
+  specialite?: string;
+  date_embauche: string;
+  type_contrat: HRContractType;
+  date_fin_contrat?: string;
+  date_renouvellement?: string;
+  is_active: boolean;
+  contact_urgence_nom?: string;
+  contact_urgence_tel?: string;
+  contact_urgence_lien?: string;
+  pointeuse_id?: string;
+  pointeuse_device?: string;
+  pointeuse_type?: 'RFID' | 'FINGERPRINT' | 'FACE' | 'MANUAL';
+  salaire_base: number;
+  taux_horaire: number;
+  taux_piece: number;
+  prime_assiduite: number;
+  prime_transport: number;
+  mode_paiement: 'VIREMENT' | 'ESPECES' | 'CHEQUE';
+  notes?: string;
+  owner_id?: number;
+  hidden_from_societes?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface HRPointage {
+  id: string;
+  worker_id: string;
+  date: string;
+  heure_entree?: string;
+  heure_sortie?: string;
+  pause_debut?: string;
+  pause_fin?: string;
+  source: HRPointageSource;
+  heures_travaillees: number;
+  heures_normales: number;
+  heures_supp_25: number;
+  heures_supp_50: number;
+  statut: HRPointageStatus;
+  motif_absence?: string;
+  is_validated: boolean;
+  validated_by?: string;
+  notes?: string;
+}
+
+export interface HRProduction {
+  id: string;
+  worker_id: string;
+  date: string;
+  chaine_id?: string;
+  model_ref?: string;
+  pieces_produites: number;
+  pieces_defaut: number;
+  pieces_retouchees: number;
+  taux_qualite?: number;
+  rendement?: number;
+  notes?: string;
+}
+
+export interface HRAvance {
+  id: string;
+  worker_id: string;
+  date_demande: string;
+  montant: number;
+  montant_approuve?: number;
+  montant_rembourse: number;
+  solde_restant: number;
+  nb_echeances: number;
+  mois_debut_deduction?: string;
+  statut: HRAvanceStatut;
+  approuve_par?: string;
+  date_approbation?: string;
+  motif?: string;
+  notes?: string;
+}
+
+export interface HRSageExport {
+  id: string;
+  mois: string;
+  date_export: string;
+  nb_salaries: number;
+  total_salaire_base: number;
+  total_heures_supp: number;
+  total_primes: number;
+  total_avances: number;
+  total_brut: number;
+  total_net: number;
+  fichier_nom: string;
+}
+
+export interface SagePaieRow {
+  matricule: string;
+  nom: string;
+  prenom: string;
+  cin: string;
+  cnss: string;
+  nb_jours: number;
+  h_normales: number;
+  h_supp_25: number;
+  h_supp_50: number;
+  sal_base: number;
+  prime_piece: number;
+  prime_assiduite: number;
+  prime_transport: number;
+  total_brut: number;
+  avances: number;
+  net_a_payer: number;
 }

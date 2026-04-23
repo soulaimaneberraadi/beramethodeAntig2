@@ -84,7 +84,7 @@ export default function Profil() {
 
   const handleBecomeAdmin = async () => {
     try {
-      const res = await fetch('/api/setup-admin', { method: 'POST' });
+      const res = await fetch('/api/setup-admin', { credentials: 'include',  method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         login(data.user);

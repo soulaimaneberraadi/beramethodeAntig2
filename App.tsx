@@ -19,7 +19,8 @@ import {
     PackageCheck,
     Activity,
     TrendingUp,
-    Database
+    Database,
+    HardDrive
 } from 'lucide-react';
 import ModelWorkflow from './components/ModelWorkflow';
 import Library from './components/Library';
@@ -230,9 +231,9 @@ const deleteManualLinksByModel = (modelId: string) => {
 };
 
 export default function App() {
-    const { user, loading: authLoading, logout, login } = useAuth();
+    const { user, loading: authLoading, logout: authLogout, login } = useAuth();
     const [authView, setAuthView] = useState<'login' | 'signup'>('login');
-    const [isGuest, setIsGuest] = useState(true); // DEFAULT TO TRUE - NO LOGIN REQUIRED
+    const [isGuest, setIsGuest] = useState(false); // FALSE: show login screen by default
     const [lang, setLang] = useState<Lang>('fr');
     const t = TRANSLATIONS[lang];
 
@@ -284,23 +285,29 @@ export default function App() {
         setAppLoading(prev => ({ ...prev, isActive: false }));
     };
 
-    // --- AUTO GUEST LOGIN ---
-    // Silently logs in with the pre-seeded guest account on app start
-    useEffect(() => {
-        if (isGuest && !user && !authLoading) {
-            fetch('/api/auth/login', {
+    // --- GUEST LOGIN (only when user explicitly clicks "Continue as Guest") ---
+    const handleGuestLogin = async () => {
+        try {
+            const res = await fetch('/api/auth/login', {
+                credentials: 'include',
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: 'guest@local', password: 'guest2024' }),
-                credentials: 'include'
-            }).then(async res => {
-                if (res.ok) {
-                    const data = await res.json();
-                    login(data.user);
-                }
-            }).catch(() => {/* silent fail */});
-        }
-    }, [isGuest, user, authLoading]);
+            });
+            if (res.ok) {
+                const data = await res.json();
+                login(data.user);
+                setIsGuest(true);
+            }
+        } catch { /* silent fail */ }
+    };
+
+    // Full logout: clear user AND guest state so Login screen appears
+    const logout = async () => {
+        await authLogout();
+        setIsGuest(false);
+        setAuthView('login');
+    };
 
     // --- STATE: NAVIGATION ---
     const [currentView, setCurrentView] = useState<'dashboard' | 'ingenierie' | 'atelier' | 'library' | 'coupe' | 'effectifs' | 'planning' | 'suivi' | 'magasin' | 'export' | 'config' | 'parametres' | 'profil' | 'admin' | 'rendement'>('dashboard');
@@ -320,35 +327,47 @@ export default function App() {
         window.addEventListener('hashchange', applyHash);
         return () => window.removeEventListener('hashchange', applyHash);
     }, []);
-    const [navigationContext, setNavigationContext] = useState<'coupe' | 'planning' | null>(null); // NEW: Track where to return to
-    const [planningEvents, setPlanningEvents] = useState<import('./types').PlanningEvent[]>(() => {
-        try {
-            const saved = localStorage.getItem('beramethode_planning');
-            return saved ? JSON.parse(saved) : [];
-        } catch { return []; }
-    });
+    const [navigationContext, setNavigationContext] = useState<'coupe' | 'planning' | null>(null);
 
-    const [suivis, setSuivis] = useState<import('./types').SuiviData[]>(() => {
-        try {
-            const saved = localStorage.getItem('beramethode_suivis');
-            return saved ? JSON.parse(saved) : [];
-        } catch { return []; }
-    });
+    // --- SERVER-FIRST STATE: planning, suivis, demandes ---
+    const [planningEvents, setPlanningEvents] = useState<import('./types').PlanningEvent[]>([]);
+    const [suivis, setSuivis] = useState<import('./types').SuiviData[]>([]);
+    const [demandesAppro, setDemandesAppro] = useState<import('./types').DemandeAppro[]>([]);
 
-    // --- STATE: MAGASIN & ATELIER ---
-    const [demandesAppro, setDemandesAppro] = useState<import('./types').DemandeAppro[]>(() => {
-        try {
-            const saved = localStorage.getItem('beramethode_demandesAppro');
-            return saved ? JSON.parse(saved) : [];
-        } catch { return []; }
-    });
-
-    // Save planning and suivis to localstorage
+    // Load planning/suivis/demandes: from API if logged in, from localStorage if guest
     useEffect(() => {
-        localStorage.setItem('beramethode_planning', JSON.stringify(planningEvents));
-        localStorage.setItem('beramethode_suivis', JSON.stringify(suivis));
-        localStorage.setItem('beramethode_demandesAppro', JSON.stringify(demandesAppro));
-    }, [planningEvents, suivis, demandesAppro]);
+        if (user) {
+            // Load from server
+            fetch('/api/planning', { credentials: 'include' })
+                .then(r => r.ok ? r.json() : [])
+                .then(data => setPlanningEvents(Array.isArray(data) ? data : []))
+                .catch(() => setPlanningEvents([]));
+
+            fetch('/api/suivi', { credentials: 'include' })
+                .then(r => r.ok ? r.json() : [])
+                .then(data => setSuivis(Array.isArray(data) ? data : []))
+                .catch(() => setSuivis([]));
+
+            fetch('/api/demandes-appro', { credentials: 'include' })
+                .then(r => r.ok ? r.json() : [])
+                .then(data => setDemandesAppro(Array.isArray(data) ? data : []))
+                .catch(() => setDemandesAppro([]));
+        } else {
+            // Guest: load from localStorage
+            try { const s = localStorage.getItem('beramethode_planning'); setPlanningEvents(s ? JSON.parse(s) : []); } catch { setPlanningEvents([]); }
+            try { const s = localStorage.getItem('beramethode_suivis');   setSuivis(s ? JSON.parse(s) : []);         } catch { setSuivis([]);   }
+            try { const s = localStorage.getItem('beramethode_demandesAppro'); setDemandesAppro(s ? JSON.parse(s) : []); } catch { setDemandesAppro([]); }
+        }
+    }, [user]);
+
+    // Save to localStorage ONLY for guest mode
+    useEffect(() => {
+        if (!user) {
+            localStorage.setItem('beramethode_planning', JSON.stringify(planningEvents));
+            localStorage.setItem('beramethode_suivis', JSON.stringify(suivis));
+            localStorage.setItem('beramethode_demandesAppro', JSON.stringify(demandesAppro));
+        }
+    }, [planningEvents, suivis, demandesAppro, user]);
 
     const handleAddDemandeAppro = (d: Partial<import('./types').DemandeAppro>) => {
         const newDemande: import('./types').DemandeAppro = {
@@ -659,7 +678,7 @@ export default function App() {
     useEffect(() => {
         if (user) {
             // Load from Server
-            fetch('/api/models')
+            fetch('/api/models', { credentials: 'include' })
                 .then(res => {
                     if (res.ok) return res.json();
                     throw new Error('Failed to fetch models');
@@ -721,9 +740,9 @@ export default function App() {
         );
     }
 
-    if (!user && !isGuest) {
+    if (!user) {
         return authView === 'login'
-            ? <Login onSwitch={() => setAuthView('signup')} onGuest={() => setIsGuest(true)} />
+            ? <Login onSwitch={() => setAuthView('signup')} onGuest={handleGuestLogin} />
             : <Signup onSwitch={() => setAuthView('login')} />;
     }
 
@@ -800,7 +819,7 @@ export default function App() {
         // 3. UPDATE OR ADD
         if (user) {
             // Save to Server
-            fetch('/api/models', {
+            fetch('/api/models', { credentials: 'include', 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(modelToSave)
@@ -924,7 +943,7 @@ export default function App() {
 
     const deleteModel = (id: string) => {
         if (user) {
-            fetch(`/api/models/${id}`, { method: 'DELETE' })
+            fetch(`/api/models/${id}`, { credentials: 'include',  method: 'DELETE' })
                 .then(res => {
                     if (res.ok) {
                         setModels(prev => prev.filter(m => m.id !== id));
@@ -1186,6 +1205,22 @@ export default function App() {
                             <span className="text-base leading-none">{lang === 'fr' ? '🇩🇿' : '🇫🇷'}</span>
                             <span>{t.langBtn}</span>
                         </button>
+
+                        {/* DB Backup Download (Admin only) */}
+                        {user?.role === 'admin' && (
+                            <button
+                                onClick={() => {
+                                    const a = document.createElement('a');
+                                    a.href = '/api/admin/download-db';
+                                    a.download = 'beramethode-backup.sqlite';
+                                    a.click();
+                                }}
+                                className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-white border border-gray-100 text-gray-400 hover:text-blue-600 hover:border-blue-100 transition-colors cursor-pointer"
+                                title="Télécharger la base de données (Backup)"
+                            >
+                                <HardDrive className="w-3.5 h-3.5" />
+                            </button>
+                        )}
 
                         <div className="hidden md:flex items-center justify-center w-8 h-8 rounded-full bg-white border border-gray-100 text-gray-400 hover:text-emerald-600 hover:border-emerald-100 transition-colors cursor-pointer">
                             <Bell className="w-3.5 h-3.5" />

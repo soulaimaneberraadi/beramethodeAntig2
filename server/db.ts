@@ -5,6 +5,12 @@ import fs from 'fs';
 const dbPath = path.join(process.cwd(), 'database.sqlite');
 const db = new Database(dbPath);
 
+// ⚡ OPTIMISATIONS SQLITE (Performances & Intégrité)
+db.pragma('journal_mode = WAL'); // Write-Ahead Logging (Meilleure concurrence)
+db.pragma('synchronous = NORMAL'); // Équilibre entre sécurité et rapidité
+db.pragma('foreign_keys = ON'); // Activation obligatoire des contraintes de clés étrangères
+db.pragma('cache_size = -10000'); // Un cache de 10Mo environ
+
 // Create users table if it doesn't exist
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -177,6 +183,163 @@ db.exec(`
   )
 `);
 
+// PHASE 1 New Tables (planning, suivi, demandes)
+db.exec(`
+CREATE TABLE IF NOT EXISTS planning_events (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  modelId TEXT NOT NULL,
+  chaineId TEXT NOT NULL,
+  dateLancement TEXT NOT NULL,
+  dateExport TEXT NOT NULL,
+  qteTotal INTEGER NOT NULL,
+  qteProduite INTEGER DEFAULT 0,
+  status TEXT NOT NULL,
+  blockedReason TEXT,
+  superviseur TEXT,
+  strictDeadline_DDS TEXT,
+  clientName TEXT,
+  estimatedEndDate TEXT,
+  modelName TEXT,
+  sectionSplitEnabled INTEGER DEFAULT 0,
+  fournisseurId TEXT,
+  fournisseurDate TEXT,
+  prepStart TEXT,
+  prepEnd TEXT,
+  montageStart TEXT,
+  montageEnd TEXT,
+  lots_data TEXT,
+  raw_data TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS suivi_data (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  planningId TEXT NOT NULL,
+  date TEXT NOT NULL,
+  pJournaliere INTEGER,
+  totalWorkers INTEGER,
+  trs REAL,
+  raw_data TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(planningId, date)
+);
+
+CREATE TABLE IF NOT EXISTS demandes_appro (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  dateDemande TEXT NOT NULL,
+  modelId TEXT NOT NULL,
+  chaineId TEXT NOT NULL,
+  produitDesignation TEXT NOT NULL,
+  quantiteDemandee REAL NOT NULL,
+  demandeur TEXT,
+  notes TEXT,
+  statut TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+`);
+
+// PHASE 4 — Suivi Redesign + Postes Tracking
+db.exec(`
+CREATE TABLE IF NOT EXISTS poste_suivi (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  planningId TEXT NOT NULL,
+  modelId TEXT NOT NULL,
+  posteId TEXT NOT NULL,
+  workerId TEXT,
+  date TEXT NOT NULL,
+  heure_debut TEXT,
+  heure_fin TEXT,
+  pieces_entrees INTEGER DEFAULT 0,
+  pieces_sorties INTEGER DEFAULT 0,
+  pieces_defaut INTEGER DEFAULT 0,
+  temps_reel_par_piece REAL,
+  temps_prevu_par_piece REAL,
+  notes TEXT,
+  problemes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(planningId, posteId, date)
+);
+`);
+
+// PHASE 5 — Effectifs: Workers + Skills + Pointage
+db.exec(`
+CREATE TABLE IF NOT EXISTS workers (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  matricule TEXT NOT NULL,
+  nom TEXT NOT NULL,
+  prenom TEXT NOT NULL,
+  cin TEXT,
+  cnss TEXT,
+  phone TEXT,
+  date_naissance TEXT,
+  adresse TEXT,
+  photo TEXT,
+  date_embauche TEXT NOT NULL,
+  type_contrat TEXT DEFAULT 'CDI',
+  date_fin_contrat TEXT,
+  is_active INTEGER DEFAULT 1,
+  hidden_from_societes TEXT,
+  notes TEXT,
+  comments TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(owner_id, matricule)
+);
+
+CREATE TABLE IF NOT EXISTS worker_skills (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  worker_id TEXT NOT NULL,
+  poste_keyword TEXT NOT NULL,
+  fabric_type TEXT,
+  level TEXT NOT NULL,
+  source TEXT DEFAULT 'AUTO',
+  pieces_total INTEGER DEFAULT 0,
+  pieces_per_hour_avg REAL,
+  quality_rate REAL,
+  last_worked_date TEXT,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE,
+  UNIQUE(worker_id, poste_keyword, fabric_type)
+);
+
+CREATE TABLE IF NOT EXISTS worker_pointage (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  worker_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  chaine TEXT,
+  poste_assigned TEXT,
+  status TEXT DEFAULT 'PRESENT',
+  heure_entree TEXT,
+  heure_sortie TEXT,
+  heures_travaillees REAL,
+  heures_supp_25 REAL DEFAULT 0,
+  heures_supp_50 REAL DEFAULT 0,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (worker_id) REFERENCES workers(id) ON DELETE CASCADE,
+  UNIQUE(worker_id, date)
+);
+`);
+
 // Create Magasin: Déchets Table
 db.exec(`
   CREATE TABLE IF NOT EXISTS magasin_dechets (
@@ -195,6 +358,125 @@ db.exec(`
   )
 `);
 
+
+// PHASE 5 — HR Full Module (RH Complet + Sage Paie)
+db.exec(`
+CREATE TABLE IF NOT EXISTS hr_workers (
+  id TEXT PRIMARY KEY,
+  matricule TEXT UNIQUE NOT NULL,
+  full_name TEXT NOT NULL,
+  cin TEXT UNIQUE,
+  cnss TEXT,
+  phone TEXT,
+  date_naissance TEXT,
+  adresse TEXT,
+  photo TEXT,
+  sexe TEXT DEFAULT 'M',
+  role TEXT NOT NULL DEFAULT 'OPERATOR',
+  chaine_id TEXT,
+  poste TEXT,
+  specialite TEXT,
+  date_embauche TEXT NOT NULL,
+  type_contrat TEXT DEFAULT 'CDI',
+  date_fin_contrat TEXT,
+  date_renouvellement TEXT,
+  is_active INTEGER DEFAULT 1,
+  contact_urgence_nom TEXT,
+  contact_urgence_tel TEXT,
+  contact_urgence_lien TEXT,
+  pointeuse_id TEXT,
+  pointeuse_device TEXT,
+  pointeuse_type TEXT DEFAULT 'MANUAL',
+  salaire_base REAL DEFAULT 0,
+  taux_horaire REAL DEFAULT 0,
+  taux_piece REAL DEFAULT 0,
+  prime_assiduite REAL DEFAULT 0,
+  prime_transport REAL DEFAULT 0,
+  mode_paiement TEXT DEFAULT 'VIREMENT',
+  notes TEXT,
+  owner_id INTEGER NOT NULL DEFAULT 1,
+  hidden_from_societes TEXT,
+  synced_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS hr_pointage (
+  id TEXT PRIMARY KEY,
+  worker_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  heure_entree TEXT,
+  heure_sortie TEXT,
+  pause_debut TEXT,
+  pause_fin TEXT,
+  source TEXT DEFAULT 'MANUAL',
+  heures_travaillees REAL DEFAULT 0,
+  heures_normales REAL DEFAULT 0,
+  heures_supp_25 REAL DEFAULT 0,
+  heures_supp_50 REAL DEFAULT 0,
+  statut TEXT DEFAULT 'PRESENT',
+  motif_absence TEXT,
+  is_validated INTEGER DEFAULT 0,
+  validated_by TEXT,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (worker_id) REFERENCES hr_workers (id) ON DELETE CASCADE,
+  UNIQUE(worker_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS hr_production (
+  id TEXT PRIMARY KEY,
+  worker_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  chaine_id TEXT,
+  model_ref TEXT,
+  pieces_produites INTEGER DEFAULT 0,
+  pieces_defaut INTEGER DEFAULT 0,
+  pieces_retouchees INTEGER DEFAULT 0,
+  taux_qualite REAL,
+  rendement REAL,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (worker_id) REFERENCES hr_workers (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS hr_avances (
+  id TEXT PRIMARY KEY,
+  worker_id TEXT NOT NULL,
+  date_demande TEXT NOT NULL,
+  montant REAL NOT NULL,
+  montant_approuve REAL,
+  montant_rembourse REAL DEFAULT 0,
+  solde_restant REAL DEFAULT 0,
+  nb_echeances INTEGER DEFAULT 1,
+  mois_debut_deduction TEXT,
+  statut TEXT DEFAULT 'DEMANDE',
+  approuve_par TEXT,
+  date_approbation TEXT,
+  motif TEXT,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (worker_id) REFERENCES hr_workers (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS hr_sage_exports (
+  id TEXT PRIMARY KEY,
+  mois TEXT NOT NULL,
+  date_export TEXT NOT NULL,
+  nb_salaries INTEGER,
+  total_salaire_base REAL,
+  total_heures_supp REAL,
+  total_primes REAL,
+  total_avances REAL,
+  total_brut REAL,
+  total_net REAL,
+  fichier_nom TEXT,
+  fichier_data TEXT,
+  owner_id INTEGER NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`);
 
 // Create Production Tables for SuiviLive and Analysis
 db.exec(`
@@ -244,5 +526,119 @@ try {
     db.prepare("INSERT INTO production_daily (date, name, output, target, efficiency) VALUES ('2026-04-11', 'Sam', 300, 400, 75)").run();
   }
 } catch(e) {}
+
+// 🚀 CRÉATION DES INDEX POUR OPTIMISER LES PERFORMANCES (Lectures / Jointures)
+db.exec(`
+  -- Index généraux
+  CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
+  
+  -- Index Magasin
+  CREATE INDEX IF NOT EXISTS idx_magasin_products_owner ON magasin_products(owner_id);
+  CREATE INDEX IF NOT EXISTS idx_magasin_lots_product ON magasin_lots(productId);
+  CREATE INDEX IF NOT EXISTS idx_magasin_mouv_product ON magasin_mouvements(productId);
+  CREATE INDEX IF NOT EXISTS idx_magasin_mouv_date ON magasin_mouvements(date);
+
+  -- Index Production & Planification
+  CREATE INDEX IF NOT EXISTS idx_planning_events_owner ON planning_events(owner_id);
+  CREATE INDEX IF NOT EXISTS idx_suivi_data_planning ON suivi_data(planningId, date);
+  CREATE INDEX IF NOT EXISTS idx_poste_suivi_planning ON poste_suivi(planningId, posteId, date);
+
+  -- Index Workers (Standard)
+  CREATE INDEX IF NOT EXISTS idx_workers_owner ON workers(owner_id);
+  CREATE INDEX IF NOT EXISTS idx_worker_pointage_lookup ON worker_pointage(worker_id, date);
+
+  -- Index HR (Avancé)
+  CREATE INDEX IF NOT EXISTS idx_hr_workers_matricule ON hr_workers(matricule);
+  CREATE INDEX IF NOT EXISTS idx_hr_workers_cin ON hr_workers(cin);
+  CREATE INDEX IF NOT EXISTS idx_hr_workers_chaine ON hr_workers(chaine_id);
+  CREATE INDEX IF NOT EXISTS idx_hr_pointage_worker_date ON hr_pointage(worker_id, date);
+  CREATE INDEX IF NOT EXISTS idx_hr_production_worker_date ON hr_production(worker_id, date);
+  CREATE INDEX IF NOT EXISTS idx_hr_avances_worker ON hr_avances(worker_id);
+  CREATE INDEX IF NOT EXISTS idx_hr_sage_owner ON hr_sage_exports(owner_id, mois);
+`);
+
+// ============================================================================
+// 🧠 ARCHITECTURE D'INTELLIGENCE ARTIFICIELLE (AI-READY ENVIRONMENT)
+// ============================================================================
+
+db.exec(`
+  -- 1. 🛡️ AUDIT LOGS (Le cerveau de la mémoire pour l'IA)
+  -- Enregistre tout ce qui se passe dans la DB (Traçabilité absolue / Data Pipelines)
+  CREATE TABLE IF NOT EXISTS system_audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name TEXT NOT NULL,
+      action TEXT NOT NULL, -- INSERT, UPDATE, DELETE
+      record_id TEXT NOT NULL,
+      old_data TEXT, -- Format JSON pour l'IA
+      new_data TEXT, -- Format JSON pour l'IA
+      changed_by TEXT DEFAULT 'SYSTEM',
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_table ON system_audit_logs(table_name, action);
+
+  -- 2. 🤖 AI VIEWS (Vues pré-digérées pour que l'LLM puisse requêter facilement)
+  -- Vue 1 : Profil de performance des employés (Idéal pour l'IA RH)
+  CREATE VIEW IF NOT EXISTS ai_worker_performance_view AS
+  SELECT 
+      w.id AS worker_id,
+      w.matricule,
+      w.full_name,
+      w.chaine_id,
+      w.poste,
+      COUNT(DISTINCT p.date) as days_present,
+      SUM(p.heures_travaillees) as total_hours,
+      SUM(prod.pieces_produites) as total_pieces,
+      SUM(prod.pieces_defaut) as total_defects,
+      CASE WHEN SUM(prod.pieces_produites) > 0 THEN 
+          CAST((SUM(prod.pieces_defaut) * 100.0 / SUM(prod.pieces_produites)) AS REAL) 
+      ELSE 0 END as defect_rate_percentage
+  FROM hr_workers w
+  LEFT JOIN hr_pointage p ON w.id = p.worker_id AND p.statut = 'PRESENT'
+  LEFT JOIN hr_production prod ON w.id = prod.worker_id
+  GROUP BY w.id;
+
+  -- Vue 2 : Pipeline d'analyse de la production
+  CREATE VIEW IF NOT EXISTS ai_production_overview_view AS
+  SELECT 
+      date,
+      name as line_name,
+      output as actual_output,
+      target as target_output,
+      efficiency,
+      CASE WHEN output < target THEN 'UNDERPERFORMING_ALERT'
+           WHEN output >= target THEN 'EXCEEDING_TARGET'
+           ELSE 'NORMAL_FLOW' END as ai_status_flag
+  FROM production_daily;
+
+  -- 3. 🚨 SÉCURITÉ ET TRIGGERS (Smart Safeguards)
+  -- Empêche formellement l'insertion de salaires négatifs
+  CREATE TRIGGER IF NOT EXISTS trg_prevent_negative_salary
+  BEFORE INSERT ON hr_workers
+  FOR EACH ROW
+  WHEN NEW.salaire_base < 0
+  BEGIN
+      SELECT RAISE(ABORT, 'AI_SECURITY_LOCK: Salaire de base ne peut pas etre negatif');
+  END;
+
+  -- Empêche formellement de pointer plus de 24h/jour
+  CREATE TRIGGER IF NOT EXISTS trg_prevent_impossible_hours
+  BEFORE INSERT ON hr_pointage
+  FOR EACH ROW
+  WHEN NEW.heures_travaillees > 24 OR NEW.heures_travaillees < 0
+  BEGIN
+      SELECT RAISE(ABORT, 'AI_ANOMALY_DETECTION: Heures travaillees invalides (>24 ou <0)');
+  END;
+
+  -- Audit au moment de la suppression d'un employé (Le système garde sa mémoire)
+  CREATE TRIGGER IF NOT EXISTS trg_audit_worker_delete
+  AFTER DELETE ON hr_workers
+  FOR EACH ROW
+  BEGIN
+      INSERT INTO system_audit_logs (table_name, action, record_id, old_data, changed_by)
+      VALUES ('hr_workers', 'DELETE', OLD.id, 
+              '{"matricule":"' || OLD.matricule || '", "name":"' || OLD.full_name || '"}', 
+              'SYSTEM_TRIGGER');
+  END;
+`);
 
 export default db;

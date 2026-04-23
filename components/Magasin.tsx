@@ -1436,12 +1436,12 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
         const fetchData = async () => {
             try {
                 const [resProd, resLots, resMvts, resCmds, resDms, resDechets] = await Promise.all([
-                    fetch('/api/magasin/products'),
-                    fetch('/api/magasin/lots'),
-                    fetch('/api/magasin/mouvements'),
-                    fetch('/api/magasin/commandes'),
-                    fetch('/api/magasin/demandes'),
-                    fetch('/api/magasin/dechets')
+                    fetch('/api/magasin/products', { credentials: 'include' }),
+                    fetch('/api/magasin/lots', { credentials: 'include' }),
+                    fetch('/api/magasin/mouvements', { credentials: 'include' }),
+                    fetch('/api/magasin/commandes', { credentials: 'include' }),
+                    fetch('/api/magasin/demandes', { credentials: 'include' }),
+                    fetch('/api/magasin/dechets', { credentials: 'include' })
                 ]);
 
                 if (resProd.ok) setProducts(await resProd.json());
@@ -1483,7 +1483,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
 
     const refreshProducts = async () => {
         try {
-            const res = await fetch('/api/magasin/products');
+            const res = await fetch('/api/magasin/products', { credentials: 'include' });
             if (res.ok) {
                 setProducts(await res.json());
             }
@@ -1555,7 +1555,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
 
     const saveProduct = async (p: MagasinProduct) => {
         try {
-            const res = await fetch('/api/magasin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+            const res = await fetch('/api/magasin/products', { credentials: 'include',  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
             if (res.ok) {
                 await refreshProducts();
                 setProdModal({ open: false });
@@ -1569,7 +1569,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
     const deleteProduct = async (id: string) => {
         if (confirm('Supprimer l\'article (Action irréversible sur la base de données) ?')) {
             try {
-                const res = await fetch(`/api/magasin/products/${id}`, { method: 'DELETE' });
+                const res = await fetch(`/api/magasin/products/${id}`, { credentials: 'include',  method: 'DELETE' });
                 if (res.ok) {
                     setProducts(prev => prev.filter(p => p.id !== id));
                     setLots(prev => prev.filter(l => l.productId !== id));
@@ -1583,7 +1583,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
 
     const saveCommande = async (c: BonCommande) => {
         try {
-            const res = await fetch('/api/magasin/commandes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) });
+            const res = await fetch('/api/magasin/commandes', { credentials: 'include',  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) });
             if (res.ok) {
                 setCommandes(prev => prev.find(x => x.id === c.id) ? prev.map(x => x.id === c.id ? c : x) : [c, ...prev]);
                 return true;
@@ -1593,14 +1593,14 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
 
     const deleteCommande = async (id: string) => {
         try {
-            const res = await fetch(`/api/magasin/commandes/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/magasin/commandes/${id}`, { credentials: 'include',  method: 'DELETE' });
             if (res.ok) setCommandes(prev => prev.filter(x => x.id !== id));
         } catch (e) { console.error(e); }
     };
 
     const saveDemande = async (d: DemandeAppro) => {
         try {
-            const res = await fetch('/api/magasin/demandes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) });
+            const res = await fetch('/api/magasin/demandes', { credentials: 'include',  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) });
             if (res.ok) {
                 setDemandes(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [d, ...prev]);
                 return true;
@@ -1610,14 +1610,14 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
 
     const deleteDemande = async (id: string) => {
         try {
-            const res = await fetch(`/api/magasin/demandes/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/magasin/demandes/${id}`, { credentials: 'include',  method: 'DELETE' });
             if (res.ok) setDemandes(prev => prev.filter(x => x.id !== id));
         } catch (e) { console.error(e); }
     };
 
     const saveDechet = async (d: any) => {
         try {
-            const res = await fetch('/api/magasin/dechets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) });
+            const res = await fetch('/api/magasin/dechets', { credentials: 'include',  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) });
             if (res.ok) {
                 setDechets(prev => prev.find(x => x.id === d.id) ? prev.map(x => x.id === d.id ? d : x) : [d, ...prev]);
                 return true;
@@ -1627,14 +1627,14 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
 
     const deleteDechet = async (id: string) => {
         try {
-            const res = await fetch(`/api/magasin/dechets/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/magasin/dechets/${id}`, { credentials: 'include',  method: 'DELETE' });
             if (res.ok) setDechets(prev => prev.filter(x => x.id !== id));
         } catch (e) { console.error(e); }
     };
 
     const saveMovementChanges = async (movement: MouvementStock) => {
         try {
-            const res = await fetch(`/api/magasin/mouvements/${movement.id}`, {
+            const res = await fetch(`/api/magasin/mouvements/${movement.id}`, { credentials: 'include', 
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(movement)
@@ -1655,7 +1655,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
     const deleteMovement = async (id: string) => {
         if (!confirm('Supprimer cette activité ?')) return;
         try {
-            const res = await fetch(`/api/magasin/mouvements/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/magasin/mouvements/${id}`, { credentials: 'include',  method: 'DELETE' });
             if (!res.ok) {
                 const text = await res.text();
                 throw new Error(text || 'Erreur Serveur');
@@ -1743,7 +1743,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
         }
 
         try {
-            const res = await fetch('/api/magasin/mvt', {
+            const res = await fetch('/api/magasin/mvt', { credentials: 'include', 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mouvement: payloadMouvement, lotsUpdate: payloadLotsUpdate, productUpdate: payloadProductUpdate })
@@ -3067,7 +3067,7 @@ export default function Magasin({ models = [], planningEvents = [], lang = 'fr' 
                     }}
                     onSave={async (updatedProduct) => {
                         try {
-                            const res = await fetch('/api/magasin/products', { 
+                            const res = await fetch('/api/magasin/products', { credentials: 'include',  
                                 method: 'POST', 
                                 headers: { 'Content-Type': 'application/json' }, 
                                 body: JSON.stringify(updatedProduct) 

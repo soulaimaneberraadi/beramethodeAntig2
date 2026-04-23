@@ -32,6 +32,8 @@ const STATUS_CONFIG: Record<string, { label: string; bar: string; bg: string; bo
 
 const DAY_WIDTH_MAP = { daily: 240, weekly: 120, monthly: 40 };
 
+const MODEL_COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getNetWorkHours(settings: AppSettings): number {
@@ -106,6 +108,7 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
         clientName: '',
         strictDeadline_DDS: '',
         fournisseurDate: '' as string,
+        color: '#6366f1',
     });
 
     // Open edit modal
@@ -276,7 +279,8 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
             strictDeadline_DDS: newEv.strictDeadline_DDS || undefined,
             sectionSplitEnabled: splitEnabled,
             prepStart: splitEnabled ? newEv.startDate : undefined,
-            fournisseurDate: (newEv as any).fournisseurDate || undefined,
+            fournisseurDate: newEv.fournisseurDate || undefined,
+            color: newEv.color || '#6366f1',
         };
         const dates = calculateSectionDates(baseEv, model, settings);
         const ev: PlanningEvent = {
@@ -289,7 +293,7 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
         };
         setPlanningEvents(prev => [ev, ...prev]);
         setAddModal(false);
-        setNewEv({ modelId: '', chaineId: 'CHAINE 1', startDate: new Date().toISOString().split('T')[0], quantity: 0, clientName: '', strictDeadline_DDS: '', fournisseurDate: '' });
+        setNewEv({ modelId: '', chaineId: 'CHAINE 1', startDate: new Date().toISOString().split('T')[0], quantity: 0, clientName: '', strictDeadline_DDS: '', fournisseurDate: '', color: '#6366f1' });
     };
 
     // ── Stats ────────────────────────────────────────────────────────────────
@@ -517,6 +521,7 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
                                                         ${cfg.bg} ${cfg.border}
                                                         ${risk ? 'animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.5)]' : 'shadow-md'}`}
                                                 >
+                                                    {ev.color && <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l" style={{ backgroundColor: ev.color }} />}
                                                     <div className="flex items-start justify-between gap-1 mb-0.5">
                                                         <span className="font-bold text-white/90 truncate leading-tight">{name}</span>
                                                         {risk && <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />}
@@ -954,16 +959,76 @@ export default function Planning({ models, planningEvents, setPlanningEvents, se
                                     />
                                 </div>
 
-                                {/* Preview */}
-                                {newEv.modelId && newEv.quantity > 0 && (() => {
-                                    const m   = models.find(mod => mod.id === newEv.modelId);
-                                    const sam = m?.meta_data.total_temps || 15;
-                                    const ch  = chaines.find(c => c.id === newEv.chaineId);
-                                    const endIso = calculateEndDate(newEv.startDate, newEv.quantity, sam, ch?.efficiency || 0.85, settings);
+                                {/* Color Picker */}
+                                <div>
+                                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider block mb-1.5">Couleur OF (Suivi)</label>
+                                    <div className="flex gap-2 flex-wrap">
+                                        {MODEL_COLORS.map(c => (
+                                            <button key={c} type="button"
+                                                onClick={() => setNewEv(p => ({ ...p, color: c }))}
+                                                className={`w-7 h-7 rounded-full transition-all border-2 ${newEv.color === c ? 'border-white scale-110 shadow-[0_0_8px_rgba(255,255,255,0.4)]' : 'border-transparent opacity-70 hover:opacity-100'}`}
+                                                style={{ backgroundColor: c }} />
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Model Preview */}
+                                {newEv.modelId && (() => {
+                                    const m = models.find(mod => mod.id === newEv.modelId);
+                                    if (!m) return null;
+                                    const sam = m.meta_data.total_temps || 15;
+                                    const ch = chaines.find(c => c.id === newEv.chaineId);
+                                    const eff = ch?.efficiency || 0.85;
+                                    const hoursPerDay = getNetWorkHours(settings);
+                                    const endIso = newEv.quantity > 0 ? calculateEndDate(newEv.startDate, newEv.quantity, sam, eff, settings) : null;
+                                    const totalHrs = newEv.quantity > 0 ? (newEv.quantity * sam / 60) / eff : 0;
+                                    const daysNeeded = totalHrs > 0 ? Math.ceil(totalHrs / hoursPerDay) : 0;
+                                    const ops = m.gamme_operatoire || [];
+                                    const machines = [...new Set(ops.map(op => op.machineName).filter(Boolean))].slice(0, 6) as string[];
+                                    const prepOps = ops.filter(op => op.section === 'PREPARATION');
+                                    const montOps = ops.filter(op => op.section === 'MONTAGE');
+                                    const globalOps = ops.filter(op => !op.section || op.section === 'GLOBAL');
                                     return (
-                                        <div className="bg-indigo-900/20 border border-indigo-700/40 rounded-xl p-3 text-xs text-indigo-300">
-                                            <span className="font-bold">Fin estimée :</span> {endIso.split('T')[0]}
-                                            <span className="ml-3 text-indigo-500">SAM: {sam} min</span>
+                                        <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden">
+                                            <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
+                                                <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Aperçu Modèle</span>
+                                                <span className="text-[10px] font-bold text-indigo-400">SAM: {sam} min</span>
+                                            </div>
+                                            <div className="p-3 space-y-2">
+                                                <div className="flex justify-between text-xs">
+                                                    <span className="text-gray-500">Effectif</span>
+                                                    <span className="font-black text-indigo-300">{m.meta_data.effectif || '—'} ouvriers</span>
+                                                </div>
+                                                {daysNeeded > 0 && (
+                                                    <div className="flex justify-between text-xs">
+                                                        <span className="text-gray-500">Jours estimés</span>
+                                                        <span className="font-black text-emerald-300">{daysNeeded} j</span>
+                                                    </div>
+                                                )}
+                                                {endIso && (
+                                                    <div className="flex justify-between text-xs">
+                                                        <span className="text-gray-500">Fin estimée</span>
+                                                        <span className="font-black text-white">{endIso.split('T')[0]}</span>
+                                                    </div>
+                                                )}
+                                                {(prepOps.length > 0 || montOps.length > 0) && (
+                                                    <div className="flex gap-1.5 flex-wrap">
+                                                        {prepOps.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-900/40 text-blue-300 rounded border border-blue-700/30">Prép: {prepOps.length} ops</span>}
+                                                        {montOps.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-900/40 text-emerald-300 rounded border border-emerald-700/30">Mont: {montOps.length} ops</span>}
+                                                        {globalOps.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-800 text-gray-400 rounded border border-gray-700">Gbl: {globalOps.length}</span>}
+                                                    </div>
+                                                )}
+                                                {machines.length > 0 && (
+                                                    <div>
+                                                        <p className="text-[10px] text-gray-600 font-bold uppercase tracking-wider mb-1">Machines</p>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {machines.map(mach => (
+                                                                <span key={mach} className="text-[10px] font-bold px-2 py-0.5 bg-gray-800 text-gray-300 rounded border border-gray-700">{mach}</span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     );
                                 })()}

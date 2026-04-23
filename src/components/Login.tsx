@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, Github, Chrome, ArrowRight, User, Sun, Moon } from 'lucide-react';
+import { Lock, Mail, Github, Chrome, ArrowRight, User, Sun, Moon, Download, Wifi, Database } from 'lucide-react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 
 export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onGuest?: () => void }) {
@@ -23,6 +23,16 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
 
   // Theme State: 'dark' or 'light'
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [networkAddresses, setNetworkAddresses] = useState<string[]>([]);
+  const [dbDownloading, setDbDownloading] = useState(false);
+
+  // Fetch network info on mount
+  useEffect(() => {
+    fetch('/api/network-info')
+      .then(r => r.json())
+      .then(data => setNetworkAddresses(data.addresses || []))
+      .catch(() => {});
+  }, []);
 
   // ... (keep existing useEffect and toggleTheme)
 
@@ -71,7 +81,7 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
     setCanResend(false);
     // Call API to resend code
     try {
-      await fetch('/api/auth/forgot-password', {
+      await fetch('/api/auth/forgot-password', { credentials: 'include', 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail }),
@@ -101,7 +111,30 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
   const passwordStrength = getPasswordStrength(newPassword);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    // ... (keep existing handleSubmit)
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        credentials: 'include',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Email ou mot de passe incorrect');
+      }
+
+      login(data.user);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -109,7 +142,7 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
     setResetError('');
     setResetLoading(true);
     try {
-      const res = await fetch('/api/auth/forgot-password', {
+      const res = await fetch('/api/auth/forgot-password', { credentials: 'include', 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail }),
@@ -137,7 +170,7 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
       return;
     }
     try {
-      const res = await fetch('/api/auth/verify-code', {
+      const res = await fetch('/api/auth/verify-code', { credentials: 'include', 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail, code }),
@@ -158,7 +191,7 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
     setResetLoading(true);
     const code = otp.join('');
     try {
-      const res = await fetch('/api/auth/reset-password', {
+      const res = await fetch('/api/auth/reset-password', { credentials: 'include', 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail, code, newPassword }),
@@ -597,10 +630,50 @@ export default function Login({ onSwitch, onGuest }: { onSwitch: () => void, onG
           </p>
         </motion.div>
       </motion.div>
+
+      {/* Network Access Info */}
+      {networkAddresses.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.8 }}
+          className={`absolute bottom-20 left-1/2 -translate-x-1/2 z-10 px-5 py-3 rounded-2xl backdrop-blur-xl border ${
+            isDark 
+              ? 'bg-white/5 border-white/10' 
+              : 'bg-white/60 border-white/40 shadow-sm'
+          }`}
+        >
+          <div className="flex items-center gap-2 mb-1.5">
+            <Wifi className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              Accès réseau local
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {networkAddresses.map((ip, i) => (
+              <button
+                key={i}
+                onClick={() => navigator.clipboard?.writeText(`http://${ip}:8000`)}
+                className={`text-xs font-mono px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
+                  isDark 
+                    ? 'bg-slate-800/60 text-slate-300 hover:bg-emerald-500/20 hover:text-emerald-300' 
+                    : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+                }`}
+                title="Cliquer pour copier"
+              >
+                http://{ip}:8000
+              </button>
+            ))}
+          </div>
+          <p className={`text-[10px] mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            Ouvrez cette adresse depuis un autre appareil (téléphone, PC) sur le même WiFi
+          </p>
+        </motion.div>
+      )}
       
       {/* Footer Copyright */}
       <div className="absolute bottom-6 text-center w-full z-10">
-         <p className={`text-xs font-medium transition-colors duration-500 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>© {new Date().getFullYear()} BeraMethode. All rights reserved.</p>
+         <p className={`text-xs font-medium transition-colors duration-500 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>© {new Date().getFullYear()} BeraMethode — AJANIF TEX. Tous droits réservés.</p>
       </div>
     </div>
   );
