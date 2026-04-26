@@ -19,6 +19,8 @@ dist-ssr
 
 # Database (contains sensitive user data)
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.db
 
 # Editor directories and files
