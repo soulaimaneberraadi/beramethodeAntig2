@@ -1375,6 +1375,7 @@ export default function App() {
                 {currentView === 'suivi' && (
                     <SuiviProduction
                         models={models}
+                        setModels={setModels}
                         suivis={suivis}
                         setSuivis={setSuivis}
                         planningEvents={planningEvents}

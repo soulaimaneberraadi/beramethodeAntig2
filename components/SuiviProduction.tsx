@@ -6,7 +6,7 @@ import {
     AlertTriangle, ShieldAlert, Timer, CheckCircle2, Factory, Filter, Settings2,
     BarChart3, TrendingUp, ListChecks, Clock, ChevronDown, ChevronUp, Users,
     Wrench, AlertCircle, Save, X, Edit3, Eye, Layers, Zap, ArrowRight,
-    RefreshCw, MessageSquare, ArrowUpDown
+    RefreshCw, MessageSquare, ArrowUpDown, Hash, Scissors, Gauge
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════
@@ -49,6 +49,223 @@ function MiniLineChart({ data, color = '#10b981', height = 50, width = 180 }: { 
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SUIVI MODEL HEADER (model identity + live time)
+// ═══════════════════════════════════════════════════════════════
+
+const HALA_LABEL: Record<string, { label: string; cls: string }> = {
+    EN_COURS:   { label: 'En cours',    cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+    TERMINE:    { label: 'Terminé',     cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    EN_ATTENTE: { label: 'En attente',  cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+    BLOQUE:     { label: 'Bloqué',      cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+};
+
+const KISBA_LABEL: Record<string, string> = {
+    COUPE:      'Coupé',
+    EN_COURS:   'En cours',
+    NON_LANCE:  'Non lancé',
+    AUTRE:      'Autre',
+};
+
+function SuiviModelHeader({
+    model,
+    planning,
+    currentHourLabel,
+    baseTime,
+    onUpdateMeta,
+}: {
+    model: ModelData | null;
+    planning: PlanningEvent | null;
+    currentHourLabel: string;
+    baseTime: number;
+    onUpdateMeta?: (modelId: string, patch: Partial<ModelData['meta_data']>) => void;
+}) {
+    if (!model) {
+        return (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 flex items-center gap-3 text-slate-500">
+                <Box className="w-5 h-5 text-slate-400" />
+                <div className="flex-1">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Aucun modèle actif</p>
+                    <p className="text-[11px] text-slate-400">Sélectionnez un modèle dans le filtre, ou démarrez un planning pour qu'il apparaisse automatiquement.</p>
+                </div>
+                <span className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 text-[11px] font-bold shadow-sm">
+                    <Clock className="w-3.5 h-3.5" /> {currentHourLabel}
+                </span>
+            </div>
+        );
+    }
+
+    const meta = model.meta_data;
+    const front = model.images?.front || model.image || null;
+    const back = model.images?.back || null;
+    const hala = meta.hala ? HALA_LABEL[meta.hala] : null;
+    const kisba = meta.kisba ? KISBA_LABEL[meta.kisba] : null;
+    const qty = planning?.qteTotal ?? meta.quantity ?? 0;
+    const produced = planning?.qteProduite ?? 0;
+
+    return (
+        <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-indigo-50/40 shadow-sm overflow-hidden">
+            <div className="flex flex-col sm:flex-row gap-3 p-3">
+                {/* Left: images */}
+                <div className="flex gap-2 shrink-0">
+                    <div className="w-20 h-24 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center">
+                        {front
+                            ? <img src={front} alt={meta.nom_modele} className="w-full h-full object-cover" />
+                            : <Box className="w-7 h-7 text-slate-300" />
+                        }
+                    </div>
+                    {back && (
+                        <div className="w-14 h-24 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 hidden sm:block">
+                            <img src={back} alt={`${meta.nom_modele} (back)`} className="w-full h-full object-cover opacity-90" />
+                        </div>
+                    )}
+                </div>
+
+                {/* Right: info grid */}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div className="min-w-0">
+                            <h2 className="text-base sm:text-lg font-black text-slate-800 truncate flex items-center gap-2">
+                                <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                                {meta.nom_modele}
+                                {meta.reference && (
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                        Réf. {meta.reference}
+                                    </span>
+                                )}
+                            </h2>
+                            {meta.category && (
+                                <p className="text-[11px] text-slate-500 mt-0.5">{meta.category}</p>
+                            )}
+                        </div>
+                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-amber-200 text-amber-700 text-[11px] font-black shadow-sm">
+                            <Clock className="w-3.5 h-3.5" /> Maintenant&nbsp;{currentHourLabel}
+                        </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                        <HeaderStat icon={<Hash className="w-3.5 h-3.5" />} label="Qté"
+                            value={`${produced}/${qty}`} />
+                        <HeaderStat icon={<Timer className="w-3.5 h-3.5" />} label="Temps SAM"
+                            value={`${baseTime.toFixed(2)} min`} />
+                        <HeaderEditable
+                            icon={<Gauge className="w-3.5 h-3.5" />}
+                            label="Avancement (todm)"
+                            value={meta.todm || ''}
+                            placeholder="ex: 60%"
+                            editable={!!onUpdateMeta}
+                            onChange={v => onUpdateMeta?.(model.id, { todm: v })}
+                        />
+                        <HeaderSelect
+                            icon={<Scissors className="w-3.5 h-3.5" />}
+                            label="Coupe (kisba)"
+                            value={meta.kisba || ''}
+                            options={[
+                                { v: '', label: '—' },
+                                { v: 'COUPE', label: 'Coupé' },
+                                { v: 'EN_COURS', label: 'En cours' },
+                                { v: 'NON_LANCE', label: 'Non lancé' },
+                                { v: 'AUTRE', label: 'Autre' },
+                            ]}
+                            editable={!!onUpdateMeta}
+                            onChange={v => onUpdateMeta?.(model.id, { kisba: (v || undefined) as ModelData['meta_data']['kisba'] })}
+                        />
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">État (hala) :</span>
+                        {onUpdateMeta ? (
+                            <select
+                                value={meta.hala || ''}
+                                onChange={e => onUpdateMeta(model.id, { hala: (e.target.value || undefined) as ModelData['meta_data']['hala'] })}
+                                className={`px-2 py-0.5 rounded-md border text-[11px] font-bold cursor-pointer outline-none ${hala ? hala.cls : 'bg-white border-slate-200 text-slate-500'}`}
+                            >
+                                <option value="">—</option>
+                                <option value="EN_COURS">En cours</option>
+                                <option value="TERMINE">Terminé</option>
+                                <option value="EN_ATTENTE">En attente</option>
+                                <option value="BLOQUE">Bloqué</option>
+                            </select>
+                        ) : hala ? (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold ${hala.cls}`}>
+                                <CheckCircle2 className="w-3 h-3" /> {hala.label}
+                            </span>
+                        ) : (
+                            <span className="text-[11px] text-slate-400">—</span>
+                        )}
+                        {planning?.chaineId && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 text-[11px] font-bold">
+                                <Factory className="w-3 h-3" /> {planning.chaineId}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function HeaderStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+    return (
+        <div className="rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 shadow-sm">
+            <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                {icon}{label}
+            </div>
+            <div className="text-xs font-black text-slate-800 mt-0.5 truncate" title={value}>{value}</div>
+        </div>
+    );
+}
+
+function HeaderEditable({ icon, label, value, placeholder, editable, onChange }: {
+    icon: React.ReactNode; label: string; value: string; placeholder?: string;
+    editable: boolean; onChange: (v: string) => void;
+}) {
+    return (
+        <div className="rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 shadow-sm">
+            <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                {icon}{label}
+            </div>
+            {editable ? (
+                <input
+                    type="text"
+                    value={value}
+                    placeholder={placeholder || '—'}
+                    onChange={e => onChange(e.target.value)}
+                    className="w-full text-xs font-black text-slate-800 bg-transparent outline-none mt-0.5 focus:bg-slate-50 rounded"
+                />
+            ) : (
+                <div className="text-xs font-black text-slate-800 mt-0.5 truncate" title={value}>{value || '—'}</div>
+            )}
+        </div>
+    );
+}
+
+function HeaderSelect({ icon, label, value, options, editable, onChange }: {
+    icon: React.ReactNode; label: string; value: string;
+    options: { v: string; label: string }[];
+    editable: boolean; onChange: (v: string) => void;
+}) {
+    const display = options.find(o => o.v === value)?.label || '—';
+    return (
+        <div className="rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 shadow-sm">
+            <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                {icon}{label}
+            </div>
+            {editable ? (
+                <select
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                    className="w-full text-xs font-black text-slate-800 bg-transparent outline-none mt-0.5 cursor-pointer focus:bg-slate-50 rounded"
+                >
+                    {options.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+                </select>
+            ) : (
+                <div className="text-xs font-black text-slate-800 mt-0.5 truncate">{display}</div>
+            )}
+        </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TYPES & INTERFACES
 // ═══════════════════════════════════════════════════════════════
 
@@ -56,6 +273,7 @@ type SuiviTab = 'modele' | 'postes' | 'charts' | 'history';
 
 interface SuiviProductionProps {
     models: ModelData[];
+    setModels?: React.Dispatch<React.SetStateAction<ModelData[]>>;
     suivis: SuiviData[];
     setSuivis: React.Dispatch<React.SetStateAction<SuiviData[]>>;
     planningEvents?: PlanningEvent[];
@@ -66,7 +284,16 @@ interface SuiviProductionProps {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════
 
-export default function SuiviProduction({ models, suivis = [], setSuivis, planningEvents = [], settings }: SuiviProductionProps) {
+export default function SuiviProduction({ models, setModels, suivis = [], setSuivis, planningEvents = [], settings }: SuiviProductionProps) {
+
+    // ─── Update model meta_data fields (todm/kisba/hala) inline from header ───
+    const updateModelMeta = useCallback((modelId: string, patch: Partial<ModelData['meta_data']>) => {
+        if (!setModels) return;
+        setModels(prev => prev.map(m => m.id === modelId
+            ? { ...m, meta_data: { ...m.meta_data, ...patch } }
+            : m));
+    }, [setModels]);
+
     // ─── Active Tab ───
     const [activeTab, setActiveTab] = useState<SuiviTab>('modele');
 
@@ -83,6 +310,18 @@ export default function SuiviProduction({ models, suivis = [], setSuivis, planni
 
     // ─── History State ───
     const [historyDateRange, setHistoryDateRange] = useState<'7d' | '30d' | 'all'>('7d');
+
+    // ─── Current Hour (live, refreshed every minute) ───
+    const computeHourKey = () => {
+        const d = new Date();
+        const hh = d.getHours().toString().padStart(2, '0');
+        return { key: `h${hh}00`, label: `${hh}:00` };
+    };
+    const [currentHour, setCurrentHour] = useState(computeHourKey);
+    useEffect(() => {
+        const id = setInterval(() => setCurrentHour(computeHourKey()), 60_000);
+        return () => clearInterval(id);
+    }, []);
 
     // ─── Dynamic HOURS from Settings ───
     const { HOURS, HOUR_KEYS } = useMemo(() => {
@@ -242,6 +481,30 @@ export default function SuiviProduction({ models, suivis = [], setSuivis, planni
         });
         return sortedChains;
     }, [suivis, planningEvents, models, filterChaine, filterModele, filterDate]);
+
+    // ─── Active Model + Planning for the Header (live) ───
+    // Logic: if a model filter is set, show that one; otherwise use the most recent IN_PROGRESS planning event.
+    const headerContext = useMemo(() => {
+        let planning: PlanningEvent | null = null;
+        let model: ModelData | null = null;
+
+        if (filterModele !== 'ALL') {
+            model = models.find(m => m.id === filterModele) || null;
+            const matches = planningEvents.filter(p => p.modelId === filterModele);
+            // Prefer IN_PROGRESS, then latest dateLancement
+            planning = matches.find(p => p.status === 'IN_PROGRESS')
+                || matches.sort((a, b) => (b.dateLancement || '').localeCompare(a.dateLancement || ''))[0]
+                || null;
+        } else {
+            const inProgress = planningEvents
+                .filter(p => p.status === 'IN_PROGRESS')
+                .sort((a, b) => (b.dateLancement || '').localeCompare(a.dateLancement || ''));
+            planning = inProgress[0] || null;
+            if (planning) model = models.find(m => m.id === planning!.modelId) || null;
+        }
+
+        return { model, planning };
+    }, [filterModele, models, planningEvents]);
 
     // ─── Active Planning Events (for postes tab) ───
     const activePlanningModels = useMemo(() => {
@@ -509,6 +772,15 @@ export default function SuiviProduction({ models, suivis = [], setSuivis, planni
                         <Settings2 className="w-3 h-3" /> Horaires sync.
                     </div>
                 </div>
+
+                {/* Model Header (visible across all tabs) */}
+                <SuiviModelHeader
+                    model={headerContext.model}
+                    planning={headerContext.planning}
+                    currentHourLabel={currentHour.label}
+                    baseTime={headerContext.model ? getBaseTime(headerContext.model) : 0}
+                    onUpdateMeta={updateModelMeta}
+                />
             </div>
 
             {/* ═══ CONTENT AREA ═══ */}
@@ -643,9 +915,18 @@ export default function SuiviProduction({ models, suivis = [], setSuivis, planni
                                             <th rowSpan={2} className="p-1 w-8"></th>
                                         </tr>
                                         <tr className="bg-slate-100 border-b border-slate-300 text-[10px]">
-                                            {HOURS.map(h => (
-                                                <th key={h} className="border-r border-slate-300 p-1.5 font-bold">{h}</th>
-                                            ))}
+                                            {HOURS.map((h, i) => {
+                                                const k = HOUR_KEYS[i];
+                                                const isNow = k === currentHour.key;
+                                                return (
+                                                    <th key={h}
+                                                        className={`border-r border-slate-300 p-1.5 font-bold ${isNow ? 'bg-amber-200 text-amber-900 ring-2 ring-amber-400 ring-inset' : ''}`}
+                                                        title={isNow ? "Heure en cours" : undefined}
+                                                    >
+                                                        {h}{isNow && <span className="ml-1 text-[8px] font-black uppercase">·now</span>}
+                                                    </th>
+                                                );
+                                            })}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -678,8 +959,12 @@ export default function SuiviProduction({ models, suivis = [], setSuivis, planni
                                                         const k = HOUR_KEYS[i];
                                                         const val = s.sorties[k];
                                                         const isFilled = val !== undefined && val >= 0;
+                                                        const isNow = k === currentHour.key;
                                                         return (
-                                                            <td key={h} className="border-r border-slate-300 h-full p-0 relative" style={{ backgroundColor: isFilled ? lightColor : 'transparent' }}>
+                                                            <td key={h}
+                                                                className={`border-r border-slate-300 h-full p-0 relative ${isNow ? 'ring-2 ring-amber-400 ring-inset' : ''}`}
+                                                                style={{ backgroundColor: isFilled ? lightColor : (isNow ? 'rgba(252, 211, 77, 0.15)' : 'transparent') }}
+                                                            >
                                                                 <input type="number" min="0" className="w-full h-full p-1.5 text-center bg-transparent outline-none border border-transparent focus:bg-white placeholder:text-transparent"
                                                                     value={val === undefined ? '' : val} onChange={e => handleUpdateHourly(s.id, k, e.target.value)} placeholder="-" />
                                                             </td>

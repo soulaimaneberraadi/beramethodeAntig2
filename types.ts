@@ -306,6 +306,9 @@ export interface ModelData {
     colors?: { id: string, name: string }[];
     quantity?: number;
     photo_url?: string; // Phase 5 Anticipation
+    todm?: string; // Avancement (free text e.g. "60%" or short note)
+    kisba?: 'COUPE' | 'EN_COURS' | 'NON_LANCE' | 'AUTRE';
+    hala?: 'EN_COURS' | 'TERMINE' | 'EN_ATTENTE' | 'BLOQUE';
   };
   gamme_operatoire: Operation[];
   // Added for Implantation persistence
