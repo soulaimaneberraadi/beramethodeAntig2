@@ -703,6 +703,10 @@ export default function SuiviProduction({ models, setModels, suivis = [], setSui
 
     return (
         <div className="h-full flex flex-col bg-slate-50 overflow-y-auto pb-24">
+            {/* ═══ TEST BANNER ═══ */}
+            <div className="w-full text-center py-6 bg-white">
+                <span className="text-7xl sm:text-9xl font-black text-red-600 tracking-widest drop-shadow-sm">SLM</span>
+            </div>
             {/* ═══ HEADER + TABS ═══ */}
             <div className="bg-white px-4 sm:px-6 py-3 flex flex-col gap-3 shrink-0 shadow-sm z-20 print:hidden sticky top-0 border-b border-slate-200">
                 {/* Title Row */}
