@@ -1228,8 +1228,8 @@ PHASE  │ STATUT    │ PROGRESSION
   3    │ ✅ DONE   │ ████████████████████ 100%
   4    │ ✅ DONE   │ ████████████████████ 100%
   5    │ ✅ DONE   │ ████████████████████ 100%
-  6    │ 🔴 0%     │ ░░░░░░░░░░░░░░░░░░░░   0%
-  7    │ 🔴 0%     │ ░░░░░░░░░░░░░░░░░░░░   0%
+  6    │ ✅ DONE   │ ████████████████████ 100%
+  7    │ 🔴 0%     │ ░░░░░░░░░░░░░░░░░░░░   0%  ← NEXT
   8    │ 🔴 0%     │ ░░░░░░░░░░░░░░░░░░░░   0%
   9    │ 🔴 0%     │ ░░░░░░░░░░░░░░░░░░░░   0%
  10    │ 🔴 0%     │ ░░░░░░░░░░░░░░░░░░░░   0%
@@ -1273,9 +1273,26 @@ PHASE  │ STATUT    │ PROGRESSION
 - ✅ `SuiviProduction.tsx` — Tri automatique des modèles par date de lancement du plan
 - ✅ `SuiviProduction.tsx` — `handleSectionToggle()` — cycle les sections
 
+### Phase 6 — Dashboard Intelligence — Handoff — 2026-04-28
+
+**Fait :**
+- ✅ T6.1 — `server/dashboardController.ts` — `getDashboardKPIs` (planning, effectifs, stock, RH, charts)
+- ✅ T6.2/T6.3/T6.4/T6.5 — Toutes les données dans une seule route `/api/dashboard/kpis`
+- ✅ T6.6 — `components/Dashboard.tsx` refactorisé avec données réelles API
+- ✅ T6.7 — KPI cards (Planning, Effectifs/Présence, Stock valeur, RH avances)
+- ✅ T6.8 — Polling 30s automatique + indicateur Wifi + bouton Actualiser
+- ✅ T6.9 — Charts: Production 7j (AreaChart), Par Chaîne (BarChart horizontal)
+- ✅ Alertes stock en temps semi-réel + Andon TRS + Widget tâches conservé
+
+**Fichiers modifiés :**
+- `server/dashboardController.ts` (déjà existant, complet)
+- `server.ts` (route `/api/dashboard/kpis` déjà enregistrée)
+- `components/Dashboard.tsx` (refactorisé complet)
+- `BERA_MASTER_PLAN.md` (section 20 mise à jour)
+
 ### Prochaine Action Recommandée
 
-**→ Démarrer Phase 6 Task T6.1** : Dashboard Intelligence (KPIs connectés).
+**→ Démarrer Phase 7** : Reporting & Exports (PDF Fiche Technique, Excel RH, CSV Sage Paie).
 
 ---
 
